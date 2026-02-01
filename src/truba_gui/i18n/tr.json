@@ -1,0 +1,98 @@
+{
+  "app": {
+    "title": "TRUBA Slurm Arayüzü"
+  },
+  "tabs": {
+    "login": "Bağlantı",
+    "editor": "Script Editörü",
+    "x11": "X11",
+    "jobs_outputs": "İşler & Çıktılar",
+    "directories": "Dizinler"
+  },
+  "login": {
+    "host": "Sunucu / IP",
+    "port": "Port",
+    "username": "Kullanıcı Adı",
+    "password": "Şifre",
+    "ssh_key": "SSH Anahtar Dosyası (ops.)",
+    "browse": "Seç",
+    "x11_enable": "X11 Forwarding (GUI uygulamaları için)",
+    "dry_run": "Simülasyon / Dry-Run (TRUBA olmadan UI test)",
+    "connect": "Bağlan",
+    "disconnect": "Bağlantıyı Kes",
+    "status_disconnected": "Bağlı değil",
+    "status_connected": "Bağlı",
+    "status_mock": "Mock mod (simülasyon)",
+    "save_password": "Şifreyi kaydet",
+    "save_profile": "Kaydet",
+    "error": "Bağlantı hatası",
+    "console": "Konsol",
+    "console_placeholder": "Bağlantı ve SSH mesajları burada görünecek...",
+    "terminal_cmd": "Komut",
+    "terminal_send": "Çalıştır",
+    "job_finished": "İş bitti: {jobid}"
+  },
+  "common": {
+    "ok": "Tamam",
+    "cancel": "İptal",
+    "error": "Hata",
+    "info": "Bilgi"
+  },
+  "placeholders": {
+    "host": "login.truba.gov.tr veya IP",
+    "remote_dir": "~/slurm_logs",
+    "script_path": "~/jobs/test.slurm"
+  },
+  "jobs": {
+    "title": "İşler",
+    "refresh": "Yenile",
+    "cancel": "İşi İptal Et"
+  },
+  "files": {
+    "title": "Çıktılar",
+    "remote_dir": "Uzak Dizin",
+    "list": "Listele",
+    "output1": "Çıktı-1",
+    "output2": "Çıktı-2"
+  },
+  "editor": {
+    "title": "Editör",
+    "open": "Aç",
+    "save": "Kaydet",
+    "submit": "Gönder (sbatch)"
+  },
+  "dirs": {
+    "refresh": "Yenile",
+    "path": "Dizin",
+    "load_failed": "Dizin okunamadı",
+    "tab_all": "Tümü",
+    "tab_folders": "Klasörler",
+    "tab_iso": "ISO",
+    "tab_archives": "Arşivler",
+    "tab_other": "Diğer",
+    "col_name": "Dosya Adı",
+    "col_size": "Boyut",
+    "col_type": "Tür",
+    "col_mtime": "Son Değişiklik",
+    "type_folder": "Klasör",
+    "file_actions": "Dosya İşlemleri",
+    "download": "İndir",
+    "edit": "Düzelt",
+    "save_as": "Farklı Kaydet",
+    "upload": "Yükle",
+    "download_selected": "Seçilenleri İndir",
+    "current": "Dizin",
+    "tab_slurm": "Slurm"
+  },
+  "jobs_outputs": {
+    "scratch_title": "Scratch (/arf/scratch)",
+    "outputs_title": "Çıktılar",
+    "output": "Çıktı",
+    "file": "Dosya",
+    "no_script": "Aktif Slurm Script: (yok)",
+    "output_stdout": "Çıktı-1: Output",
+    "output_stderr": "Çıktı-2: Error",
+    "open_out1": "Çıktı-1'de Aç",
+    "open_out2": "Çıktı-2'de Aç"
+  }
+}
