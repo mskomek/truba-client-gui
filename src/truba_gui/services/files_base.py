@@ -44,3 +44,20 @@ class FilesBackend(ABC):
     @abstractmethod
     def upload(self, local_path: str, remote_path: str) -> None:
         raise NotImplementedError
+
+    # --- Optional file operations (used by RemoteDirPanel context menu) ---
+    # Backends that don't support these can rely on the default NotImplementedError.
+    def remove(self, remote_path: str, recursive: bool = False) -> None:
+        raise NotImplementedError
+
+    def rename(self, remote_path: str, new_remote_path: str) -> None:
+        raise NotImplementedError
+
+    def mkdir(self, remote_dir: str) -> None:
+        raise NotImplementedError
+
+    def copy(self, src_remote_path: str, dst_remote_path: str, recursive: bool = False) -> None:
+        raise NotImplementedError
+
+    def move(self, src_remote_path: str, dst_remote_path: str) -> None:
+        raise NotImplementedError

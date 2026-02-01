@@ -83,3 +83,24 @@ class MainWindow(QMainWindow):
                 msg = "İş bitti: {jobid}"
             self.login.append_console(msg.format(jobid=jid))
         self._last_job_ids = job_ids
+
+    def closeEvent(self, event):
+        """Gracefully stop background helper processes on app exit.
+
+        Controlled by Login settings:
+        - close_vcxsrv_on_exit
+        - close_x11_procs_on_exit
+        """
+        try:
+            if hasattr(self, "login") and self.login:
+                self.login.shutdown_external_processes()
+        except Exception:
+            pass
+        try:
+            if hasattr(self, "x11") and self.x11:
+                # optional: kill X11 widget processes too
+                if hasattr(self.x11, "shutdown_external_processes"):
+                    self.x11.shutdown_external_processes()
+        except Exception:
+            pass
+        super().closeEvent(event)

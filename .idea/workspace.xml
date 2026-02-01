@@ -4,46 +4,22 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d68a8a31-898f-4046-ae2b-416de20498e6" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/.idea/TrubaGUI.iml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/encodings.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/inspectionProfiles/profiles_settings.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/modules.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/pyproject.toml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/truba_gui/CHANGELOG.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/truba_gui/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/truba_gui/__main__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/truba_gui/app.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/truba_gui/config/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/truba_gui/config/models.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/truba_gui/core/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/truba_gui/core/history.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/truba_gui/core/i18n.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/truba_gui/core/logging.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/truba_gui/i18n/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/truba_gui/i18n/tr.json" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/truba_gui/services/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/truba_gui/services/slurm_base.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/truba_gui/services/slurm_mock.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/truba_gui/services/xserver_manager.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/truba_gui/third_party/README.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/truba_gui/third_party/openssh/.keep" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/truba_gui/third_party/putty/.keep" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/truba_gui/third_party/vcxsrv/.keep" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/truba_gui/ui/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/truba_gui/ui/main_window.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/truba_gui/ui/widgets/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/truba_gui/ui/widgets/editor_widget.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/truba_gui/ui/widgets/jobs_widget.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/truba_gui/ui/widgets/login_widget.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/truba_gui/ui/widgets/logs_widget.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/truba_gui/ui/widgets/outputs_widget.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/truba_gui/ui/widgets/x11_widget.py" afterDir="false" />
+    <list default="true" id="d68a8a31-898f-4046-ae2b-416de20498e6" name="Changes" comment="0.0.0">
+      <change afterPath="$PROJECT_DIR$/src/truba_gui/services/putty_manager.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/truba_gui/services/windows_console.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/TrubaGUI.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/TrubaGUI.iml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/truba_gui/config/storage.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/truba_gui/config/storage.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/truba_gui/core/history.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/truba_gui/core/history.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/truba_gui/services/files_base.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/truba_gui/services/files_base.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/truba_gui/services/files_ssh.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/truba_gui/services/files_ssh.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/truba_gui/services/x11_system_ssh.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/truba_gui/services/x11_system_ssh.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/truba_gui/services/xserver_manager.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/truba_gui/services/xserver_manager.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/truba_gui/ssh/client.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/truba_gui/ssh/client.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/truba_gui/ui/main_window.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/truba_gui/ui/main_window.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/truba_gui/ui/widgets/login_widget.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/truba_gui/ui/widgets/login_widget.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/truba_gui/ui/widgets/remote_dir_panel.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/truba_gui/ui/widgets/remote_dir_panel.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/truba_gui/ui/widgets/x11_widget.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/truba_gui/ui/widgets/x11_widget.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -228,6 +204,43 @@
       <option name="presentableId" value="Default" />
       <updated>1769608185351</updated>
     </task>
+    <task id="LOCAL-00001" summary="0.0.0">
+      <option name="closed" value="true" />
+      <created>1769924730808</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1769924730808</updated>
+    </task>
+    <task id="LOCAL-00002" summary="0.0.0">
+      <option name="closed" value="true" />
+      <created>1769924767199</created>
+      <option name="number" value="00002" />
+      <option name="presentableId" value="LOCAL-00002" />
+      <option name="project" value="LOCAL" />
+      <updated>1769924767199</updated>
+    </task>
+    <task id="LOCAL-00003" summary="0.0.0">
+      <option name="closed" value="true" />
+      <created>1769924858905</created>
+      <option name="number" value="00003" />
+      <option name="presentableId" value="LOCAL-00003" />
+      <option name="project" value="LOCAL" />
+      <updated>1769924858905</updated>
+    </task>
+    <task id="LOCAL-00004" summary="0.0.0">
+      <option name="closed" value="true" />
+      <created>1769924921373</created>
+      <option name="number" value="00004" />
+      <option name="presentableId" value="LOCAL-00004" />
+      <option name="project" value="LOCAL" />
+      <updated>1769924921373</updated>
+    </task>
+    <option name="localTasksCounter" value="5" />
     <servers />
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="0.0.0" />
+    <option name="LAST_COMMIT_MESSAGE" value="0.0.0" />
   </component>
 </project>

@@ -8,11 +8,12 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTabWidget, QTreeWidget, QTreeWidgetItem,
-    QPushButton, QLineEdit, QStyle, QMessageBox, QFileDialog
+    QPushButton, QLineEdit, QStyle, QMessageBox, QFileDialog, QMenu, QInputDialog
 )
 
 from truba_gui.core.i18n import t
 from truba_gui.services.files_base import RemoteEntry
+from truba_gui.services.file_clipboard import get_file_clipboard
 
 
 def _fmt_size(n: int) -> str:
@@ -87,6 +88,9 @@ class RemoteDirPanel(QWidget):
         self.btn_download = QPushButton(t("dirs.download_selected") if t("dirs.download_selected") != "[dirs.download_selected]" else "Seçilenleri İndir")
         self.btn_download.clicked.connect(self.download_selected)
 
+        self.btn_delete = QPushButton(t("dirs.delete") if t("dirs.delete") != "[dirs.delete]" else "Sil")
+        self.btn_delete.clicked.connect(self.delete_selected)
+
         self.btn_refresh = QPushButton(t("dirs.refresh") if t("dirs.refresh") != "[dirs.refresh]" else "Yenile")
         self.btn_refresh.clicked.connect(self.refresh)
 
@@ -95,6 +99,7 @@ class RemoteDirPanel(QWidget):
         top.addStretch(1)
         top.addWidget(self.btn_upload)
         top.addWidget(self.btn_download)
+        top.addWidget(self.btn_delete)
         top.addWidget(self.btn_refresh)
 
         self.tabs = QTabWidget()
@@ -133,7 +138,28 @@ class RemoteDirPanel(QWidget):
         w.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
         w.itemDoubleClicked.connect(lambda item, col: self.open_file.emit(item.data(0, Qt.ItemDataRole.UserRole)))
         w.header().setStretchLastSection(True)
+        w.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        w.customContextMenuRequested.connect(lambda pos, view=w: self._on_context_menu(view, pos))
+        w.installEventFilter(self)
         return w
+
+    def eventFilter(self, watched, event):
+        # Delete / Paste key support on directory views
+        try:
+            from PySide6.QtCore import QEvent
+            from PySide6.QtGui import QKeyEvent
+            if isinstance(watched, QTreeWidget) and event.type() == QEvent.Type.KeyPress:
+                e: QKeyEvent = event  # type: ignore
+                if e.key() == Qt.Key.Key_Delete:
+                    self.delete_selected()
+                    return True
+                # Ctrl+V paste clipboard into current directory
+                if (e.modifiers() & Qt.KeyboardModifier.ControlModifier) and e.key() == Qt.Key.Key_V:
+                    self._paste_clipboard_into(self.current_dir or "/")
+                    return True
+        except Exception:
+            pass
+        return super().eventFilter(watched, event)
 
     def set_session(self, session):
         self.session = session
@@ -183,6 +209,7 @@ class RemoteDirPanel(QWidget):
             it.setText(2, _file_type(entry.name, entry.is_dir))
             it.setText(3, _fmt_mtime(entry.mtime))
             it.setData(0, Qt.ItemDataRole.UserRole, entry.path)
+            it.setData(0, Qt.ItemDataRole.UserRole + 1, bool(entry.is_dir))
             view.addTopLevelItem(it)
 
         for e in entries:
@@ -206,21 +233,224 @@ class RemoteDirPanel(QWidget):
         rp = it.data(0, Qt.ItemDataRole.UserRole)
         return str(rp) if rp else ""
 
-    def _on_context_menu(self, view: QTreeWidget, pos):
-        if not self.enable_output_menu:
+        def _on_context_menu(self, view: QTreeWidget, pos):
+            # Context menu for directories tab (copy/move clipboard + paste + delete/download/rename/edit).
+            if not self.session or not self.session.get("files"):
+                return
+
+            # Determine which tab key this view belongs to (for selection)
+            tab_key = "all"
+            for k, v in self.views.items():
+                if v is view:
+                    tab_key = k
+                    break
+
+            files = self.session.get("files")
+            clipboard = get_file_clipboard()
+
+            item = view.itemAt(pos)
+            clicked_path = None
+            clicked_is_dir = False
+            if item is not None:
+                clicked_path = item.data(0, Qt.ItemDataRole.UserRole)
+                clicked_is_dir = bool(item.data(0, Qt.ItemDataRole.UserRole + 1))
+
+            sel_items = view.selectedItems()
+            sel_paths = [it.data(0, Qt.ItemDataRole.UserRole) for it in sel_items if it is not None]
+            # Use clicked item if nothing is selected (common UX)
+            if not sel_paths and clicked_path:
+                sel_paths = [clicked_path]
+
+            menu = QMenu(self)
+
+            # Optional output open actions (JobsOutputsWidget)
+            if self.enable_output_menu and clicked_path:
+                a1 = menu.addAction(t("jobs_outputs.open_out1") if t("jobs_outputs.open_out1") != "[jobs_outputs.open_out1]" else "Çıktı-1'de Aç")
+                a2 = menu.addAction(t("jobs_outputs.open_out2") if t("jobs_outputs.open_out2") != "[jobs_outputs.open_out2]" else "Çıktı-2'de Aç")
+                menu.addSeparator()
+
+            # Clipboard paste actions (available even on empty area)
+            clip = clipboard.get()
+            act_paste_here = None
+            act_paste_into = None
+            if clip and clip.paths:
+                act_paste_here = menu.addAction(t("dirs.paste") if t("dirs.paste") != "[dirs.paste]" else "Yapıştır")
+                if clicked_path and clicked_is_dir:
+                    act_paste_into = menu.addAction(t("dirs.paste_into") if t("dirs.paste_into") != "[dirs.paste_into]" else "Klasöre Yapıştır")
+                menu.addSeparator()
+
+            # If there is no selection, only paste should be shown
+            if sel_paths:
+                act_edit = menu.addAction(t("dirs.edit") if t("dirs.edit") != "[dirs.edit]" else "Düzenle")
+                act_download = menu.addAction(t("dirs.download") if t("dirs.download") != "[dirs.download]" else "İndir")
+                menu.addSeparator()
+                act_rename = menu.addAction(t("dirs.rename") if t("dirs.rename") != "[dirs.rename]" else "Yeniden Adlandır")
+                act_copy = menu.addAction(t("dirs.copy") if t("dirs.copy") != "[dirs.copy]" else "Kopyala")
+                act_move = menu.addAction(t("dirs.move") if t("dirs.move") != "[dirs.move]" else "Taşı")
+                menu.addSeparator()
+                act_delete = menu.addAction(t("dirs.delete") if t("dirs.delete") != "[dirs.delete]" else "Sil")
+
+                # Disable single-selection actions when multiple are selected
+                if len(sel_paths) != 1:
+                    act_edit.setEnabled(False)
+                    act_rename.setEnabled(False)
+
+            chosen = menu.exec(view.viewport().mapToGlobal(pos))
+            if not chosen:
+                return
+
+            # Handle JobsOutputsWidget actions first
+            if self.enable_output_menu and clicked_path:
+                txt = chosen.text()
+                if txt == (t("jobs_outputs.open_out1") if t("jobs_outputs.open_out1") != "[jobs_outputs.open_out1]" else "Çıktı-1'de Aç"):
+                    self.open_in_slot.emit(0, clicked_path)
+                    return
+                if txt == (t("jobs_outputs.open_out2") if t("jobs_outputs.open_out2") != "[jobs_outputs.open_out2]" else "Çıktı-2'de Aç"):
+                    self.open_in_slot.emit(1, clicked_path)
+                    return
+
+            # Paste handling
+            if chosen == act_paste_here:
+                self._paste_clipboard_into(self.current_dir or "/")
+                return
+            if act_paste_into is not None and chosen == act_paste_into and clicked_path:
+                self._paste_clipboard_into(clicked_path)
+                return
+
+            # If there was no selection, nothing else to do
+            if not sel_paths:
+                return
+
+            # Edit (only files: single file)
+            if chosen.text() == (t("dirs.edit") if t("dirs.edit") != "[dirs.edit]" else "Düzenle"):
+                rp = sel_paths[0]
+                try:
+                    # If listdir works, it's a dir; otherwise treat as file
+                    files.listdir(rp)
+                    QMessageBox.information(self, t("common.info"), "Klasör düzenlenemez.")
+                    return
+                except Exception:
+                    pass
+                self.open_file.emit(rp)
+                return
+
+            if chosen.text() == (t("dirs.download") if t("dirs.download") != "[dirs.download]" else "İndir"):
+                self.download_selected()
+                return
+
+            if chosen.text() == (t("dirs.delete") if t("dirs.delete") != "[dirs.delete]" else "Sil"):
+                self._delete_paths(sel_paths)
+                return
+
+            if chosen.text() == (t("dirs.rename") if t("dirs.rename") != "[dirs.rename]" else "Yeniden Adlandır"):
+                if len(sel_paths) != 1:
+                    QMessageBox.information(self, t("common.info"), "Yeniden adlandırmak için tek bir öğe seçin.")
+                    return
+                old = sel_paths[0]
+                base = old.rstrip("/").split("/")[-1]
+                new_name, ok = QInputDialog.getText(self, t("dirs.rename") if t("dirs.rename") != "[dirs.rename]" else "Yeniden Adlandır", "Yeni ad:", text=base)
+                if not ok or not new_name.strip():
+                    return
+                new_path = old.rstrip("/")
+                parent = "/".join(new_path.split("/")[:-1]) or "/"
+                dst = parent.rstrip("/") + "/" + new_name.strip()
+                try:
+                    files.rename(old.rstrip("/"), dst)
+                    self.refresh()
+                except Exception as e:
+                    QMessageBox.critical(self, t("common.error"), str(e))
+                return
+
+            # Copy / Move put into clipboard (paste elsewhere / other panel)
+            if chosen.text() == (t("dirs.copy") if t("dirs.copy") != "[dirs.copy]" else "Kopyala"):
+                clipboard.set("copy", sel_paths)
+                return
+
+            if chosen.text() == (t("dirs.move") if t("dirs.move") != "[dirs.move]" else "Taşı"):
+                clipboard.set("move", sel_paths)
+                return
+
+
+
+    
+    def _paste_clipboard_into(self, dest_dir: str) -> None:
+        if not self.session or not self.session.get("files"):
             return
-        rp = self._selected_remote_path(view)
-        if not rp:
+        files = self.session.get("files")
+        clipboard = get_file_clipboard()
+        clip = clipboard.get()
+        if not clip or not clip.paths:
             return
-        from PySide6.QtWidgets import QMenu
-        menu = QMenu(self)
-        a1 = menu.addAction(t("jobs_outputs.open_out1") if t("jobs_outputs.open_out1") != "[jobs_outputs.open_out1]" else "Çıktı-1'de Aç")
-        a2 = menu.addAction(t("jobs_outputs.open_out2") if t("jobs_outputs.open_out2") != "[jobs_outputs.open_out2]" else "Çıktı-2'de Aç")
-        act = menu.exec(view.viewport().mapToGlobal(pos))
-        if act == a1:
-            self.open_in_slot.emit(0, rp)
-        elif act == a2:
-            self.open_in_slot.emit(1, rp)
+
+        # Normalize destination directory
+        dest_dir = (dest_dir or "/").strip()
+        if not dest_dir.startswith("/"):
+            # safety: remote paths should be absolute
+            dest_dir = "/" + dest_dir
+        dest_dir = dest_dir.rstrip("/") or "/"
+
+        # Perform operation item-by-item to support multi-select
+        try:
+            for src in clip.paths:
+                name = src.rstrip("/").split("/")[-1]
+                dst = dest_dir.rstrip("/") + "/" + name
+
+                # Best-effort dir detection
+                is_dir = False
+                if clip.op == "copy":
+                    # Determine directory for recursive copy
+                    try:
+                        files.listdir(src.rstrip("/"))
+                        is_dir = True
+                    except Exception:
+                        is_dir = src.endswith("/")
+                    files.copy(src.rstrip("/"), dst, recursive=is_dir)
+                else:
+                    files.move(src.rstrip("/"), dst)
+            # After move, clear clipboard
+            if clip.op == "move":
+                clipboard.clear()
+            self.refresh()
+        except Exception as e:
+            QMessageBox.critical(self, t("common.error"), str(e))
+
+def _delete_paths(self, paths: List[str]) -> None:
+        if not self.session or not self.session.get("files"):
+            QMessageBox.warning(self, t("common.error"), "Bağlantı yok.")
+            return
+        files = self.session["files"]
+        if not paths:
+            return
+        # Confirm
+        msg = "Seçilen öğeler silinsin mi?\n" + "\n".join([p.split("/")[-1] for p in paths[:10]])
+        if len(paths) > 10:
+            msg += f"\n... (+{len(paths)-10})"
+        if QMessageBox.question(self, t("common.confirm") if t("common.confirm") != "[common.confirm]" else "Onay", msg) != QMessageBox.StandardButton.Yes:
+            return
+        for rp in paths:
+            # recursive delete if dir
+            recursive = False
+            try:
+                files.listdir(rp)
+                recursive = True
+            except Exception:
+                recursive = False
+            files.remove(rp, recursive=recursive)
+        self.refresh()
+
+    def delete_selected(self):
+        # Delete from active tab view
+        tab = self.tabs.currentWidget()
+        tab_key = "all"
+        for k, v in self.views.items():
+            if v is tab:
+                tab_key = k
+                break
+        sel = self.selected_paths(tab_key)
+        if not sel:
+            QMessageBox.information(self, t("common.info"), "Dosya seçilmedi.")
+            return
+        self._delete_paths(sel)
     def upload_files(self):
         if not self.session or not self.session.get("files"):
             QMessageBox.warning(self, t("common.error"), "Bağlantı yok.")

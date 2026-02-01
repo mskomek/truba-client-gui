@@ -18,7 +18,7 @@ def _config_path() -> Path:
 def load_config() -> Dict[str, Any]:
     p = _config_path()
     if not p.exists():
-        return {"profiles": []}
+        return {"profiles": [], "settings": {}}
     try:
         return json.loads(p.read_text(encoding="utf-8"))
     except Exception:
@@ -27,7 +27,30 @@ def load_config() -> Dict[str, Any]:
             p.rename(p.with_suffix(".json.bak"))
         except Exception:
             pass
-        return {"profiles": []}
+        return {"profiles": [], "settings": {}}
+
+
+def load_settings() -> Dict[str, Any]:
+    """Load application-wide settings stored in config.json.
+
+    Settings are kept separate from profiles.
+    """
+    cfg = load_config()
+    st = cfg.get("settings", {})
+    return st if isinstance(st, dict) else {}
+
+
+def update_settings(patch: Dict[str, Any]) -> Dict[str, Any]:
+    """Merge patch into settings and persist."""
+    cfg = load_config()
+    st = cfg.get("settings")
+    if not isinstance(st, dict):
+        st = {}
+    for k, v in (patch or {}).items():
+        st[k] = v
+    cfg["settings"] = st
+    save_config(cfg)
+    return st
 
 
 def save_config(cfg: Dict[str, Any]) -> None:

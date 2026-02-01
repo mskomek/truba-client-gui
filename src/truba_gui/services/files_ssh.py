@@ -48,3 +48,41 @@ class SSHFilesBackend(FilesBackend):
 
     def upload(self, local_path: str, remote_path: str) -> None:
         self.ssh.sftp.put(local_path, remote_path)
+
+    def remove(self, remote_path: str, recursive: bool = False) -> None:
+        # Use shell rm to support recursive deletes reliably.
+        # remote_path is user-provided via UI; quote defensively.
+        import shlex
+        q = shlex.quote(remote_path)
+        cmd = f"rm {'-rf' if recursive else '-f'} {q}"
+        code, _, err = self.ssh.run(cmd)
+        if code != 0:
+            raise RuntimeError(err.strip() or f"rm failed (exit={code})")
+
+    def rename(self, remote_path: str, new_remote_path: str) -> None:
+        # Prefer SFTP rename (atomic on many servers)
+        self.ssh.sftp.rename(remote_path, new_remote_path)
+
+    def mkdir(self, remote_dir: str) -> None:
+        import shlex
+        q = shlex.quote(remote_dir)
+        code, _, err = self.ssh.run(f"mkdir -p {q}")
+        if code != 0:
+            raise RuntimeError(err.strip() or f"mkdir failed (exit={code})")
+
+    def copy(self, src_remote_path: str, dst_remote_path: str, recursive: bool = False) -> None:
+        import shlex
+        s = shlex.quote(src_remote_path)
+        d = shlex.quote(dst_remote_path)
+        cmd = f"cp {'-r' if recursive else ''} {s} {d}".strip()
+        code, _, err = self.ssh.run(cmd)
+        if code != 0:
+            raise RuntimeError(err.strip() or f"cp failed (exit={code})")
+
+    def move(self, src_remote_path: str, dst_remote_path: str) -> None:
+        import shlex
+        s = shlex.quote(src_remote_path)
+        d = shlex.quote(dst_remote_path)
+        code, _, err = self.ssh.run(f"mv {s} {d}")
+        if code != 0:
+            raise RuntimeError(err.strip() or f"mv failed (exit={code})")

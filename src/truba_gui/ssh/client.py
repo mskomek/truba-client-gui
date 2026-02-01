@@ -5,6 +5,8 @@ from typing import Callable, Optional, Tuple
 
 import paramiko
 
+from truba_gui.services.command_history_store import is_sensitive_command
+
 
 @dataclass
 class SSHConnInfo:
@@ -87,7 +89,11 @@ class SSHClientWrapper:
     def run(self, command: str) -> Tuple[int, str, str]:
         if not self.client:
             raise RuntimeError("SSH client not connected")
-        self.log(f"SSH$ {command}")
+        # Never echo secrets into the UI/logs.
+        if is_sensitive_command(command):
+            self.log("SSH$ <redacted>")
+        else:
+            self.log(f"SSH$ {command}")
         stdin, stdout, stderr = self.client.exec_command(command)
         out = stdout.read().decode(errors="replace")
         err = stderr.read().decode(errors="replace")

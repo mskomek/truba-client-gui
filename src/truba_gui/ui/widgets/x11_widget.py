@@ -64,6 +64,20 @@ class X11Widget(QWidget):
     def set_session(self, session):
         self.session = session
 
+    def shutdown_external_processes(self) -> None:
+        """Terminate background plink/ssh processes launched from this tab."""
+        for p in list(getattr(self, "_procs", [])):
+            try:
+                if p.state() != QProcess.ProcessState.NotRunning:
+                    p.terminate()
+                    p.waitForFinished(1000)
+            except Exception:
+                pass
+        try:
+            self._procs.clear()
+        except Exception:
+            pass
+
     def _log_to_label(self, msg: str) -> None:
         """Append short diagnostic messages to the label."""
         msg = (msg or "").strip()

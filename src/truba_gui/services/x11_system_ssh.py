@@ -65,11 +65,9 @@ def wrap_remote_cmd_clean_env(cmd: str) -> str:
     # Use bash -lc to behave like an interactive login-ish environment
     # and unset LD_LIBRARY_PATH to prevent custom libs from breaking X libs.
     safe = cmd.replace("'", "'\''")
-    # IMPORTANT:
-    # Some clusters emit "TERM environment variable needs set" *during* shell init (before our -c runs)
-    # if profile scripts call `tput`. So we must set TERM in the environment *before* bash starts.
+    # TERM warning: some clusters emit "TERM environment variable needs set" if shell rc uses tput.
     # Also unset LD_PRELOAD and LD_LIBRARY_PATH to avoid X11 lib symbol mismatches.
-    return f"TERM=xterm bash -lc 'unset LD_LIBRARY_PATH; unset LD_PRELOAD; {safe}'"
+    return f"bash -lc 'export TERM=xterm; unset LD_LIBRARY_PATH; unset LD_PRELOAD; {safe}'"
 
 
 def is_likely_x11_related_command(cmd: str) -> bool:

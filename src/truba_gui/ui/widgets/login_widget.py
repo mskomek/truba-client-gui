@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
 
 from truba_gui.core.i18n import t
 from truba_gui.config.models import SSHConfig
-from truba_gui.config.storage import load_profiles, upsert_profile
+from truba_gui.config.storage import load_profiles, upsert_profile, load_settings, update_settings
 from truba_gui.core.history import append_event
 from truba_gui.core.logging import append_log
 from truba_gui.services.slurm_mock import MockSlurmBackend
@@ -21,10 +21,13 @@ from truba_gui.services.x11_system_ssh import (
     wrap_remote_cmd_clean_env,
 )
 from truba_gui.services.xserver_manager import ensure_x_server_running
+from truba_gui.services.xserver_manager import stop_x_server_started_by_app
+from truba_gui.services.putty_manager import ensure_plink_available
 from truba_gui.ssh.client import SSHClientWrapper, SSHConnInfo
 from truba_gui.services.files_ssh import SSHFilesBackend
 from truba_gui.services.slurm_ssh import SSHSlurmBackend
 from truba_gui.core.crypto_master import encrypt_with_master, decrypt_with_master
+from truba_gui.ui.widgets.terminal_input import TerminalInput
 
 import shiboken6
 
@@ -61,6 +64,16 @@ class LoginWidget(QWidget):
         self.btn_browse_key.clicked.connect(self.pick_key)
 
         self.cb_x11 = QCheckBox(t("login.x11_enable") if t("login.x11_enable") != "[login.x11_enable]" else "X11 Forwarding")
+
+        # X11 preflight / lifecycle settings (app-wide)
+        self.cb_x11_autodeps = QCheckBox("X11 seçiliyken gerekli programları kontrol et/indir/başlat")
+        self.cb_x11_autodeps.setToolTip("Bağlan'a basınca plink.exe ve VcXsrv kontrol edilir. Yoksa kullanıcı onayıyla indirilir ve başlatılır.")
+
+        self.cb_close_vcxsrv_on_exit = QCheckBox("Program kapanınca VcXsrv'i kapat")
+        self.cb_close_vcxsrv_on_exit.setToolTip("TrubaGUI tarafından başlatılan VcXsrv varsa PID ile kapatılır.")
+
+        self.cb_close_x11_procs_on_exit = QCheckBox("Program kapanınca X11/SSH süreçlerini kapat")
+        self.cb_close_x11_procs_on_exit.setToolTip("TrubaGUI'nin başlattığı plink/ssh QProcess'leri terminate edilir.")
         self.cb_dry = QCheckBox(t("login.dry_run") if t("login.dry_run") != "[login.dry_run]" else "Simülasyon / Dry-Run")
 
         self.btn_save = QPushButton(t("login.save") if t("login.save") != "[login.save]" else "Kaydet")
@@ -80,11 +93,11 @@ class LoginWidget(QWidget):
         self.console.setPlaceholderText(ph)
 
         # ---- SSH terminal line
-        self.cmd_in = QLineEdit()
+        self.cmd_in = TerminalInput()
         self.cmd_in.setPlaceholderText(t("login.command_placeholder") if t("login.command_placeholder") != "[login.command_placeholder]" else "Komut yaz ve Enter/Çalıştır")
         self.btn_run_cmd = QPushButton(t("login.run_command") if t("login.run_command") != "[login.run_command]" else "Çalıştır")
-        self.btn_run_cmd.clicked.connect(self.run_command)
-        self.cmd_in.returnPressed.connect(self.run_command)
+        self.btn_run_cmd.clicked.connect(self.cmd_in.submit_current)
+        self.cmd_in.command_submitted.connect(self.run_command_text)
 
         cmd_row = QHBoxLayout()
         cmd_row.addWidget(self.cmd_in)
@@ -112,6 +125,9 @@ class LoginWidget(QWidget):
         right_lay = QVBoxLayout(right)
         right_lay.addLayout(form)
         right_lay.addWidget(self.cb_x11)
+        right_lay.addWidget(self.cb_x11_autodeps)
+        right_lay.addWidget(self.cb_close_vcxsrv_on_exit)
+        right_lay.addWidget(self.cb_close_x11_procs_on_exit)
         right_lay.addWidget(self.cb_dry)
         right_lay.addLayout(btn_row)
         right_lay.addWidget(self.status_label)
@@ -130,7 +146,48 @@ class LoginWidget(QWidget):
 
         self._session = {"connected": False, "cfg": SSHConfig(), "ssh": None, "slurm": None, "files": None}
 
+        # Load app-wide settings
+        st = load_settings()
+        self.cb_x11_autodeps.setChecked(bool(st.get("x11_autodeps", True)))
+        self.cb_close_vcxsrv_on_exit.setChecked(bool(st.get("close_vcxsrv_on_exit", True)))
+        self.cb_close_x11_procs_on_exit.setChecked(bool(st.get("close_x11_procs_on_exit", True)))
+
+        # Persist settings on toggle
+        self.cb_x11_autodeps.stateChanged.connect(lambda _=None: self._save_settings())
+        self.cb_close_vcxsrv_on_exit.stateChanged.connect(lambda _=None: self._save_settings())
+        self.cb_close_x11_procs_on_exit.stateChanged.connect(lambda _=None: self._save_settings())
+
         self.refresh_profiles()
+
+    def _save_settings(self) -> None:
+        update_settings({
+            "x11_autodeps": self.cb_x11_autodeps.isChecked(),
+            "close_vcxsrv_on_exit": self.cb_close_vcxsrv_on_exit.isChecked(),
+            "close_x11_procs_on_exit": self.cb_close_x11_procs_on_exit.isChecked(),
+        })
+
+    def shutdown_external_processes(self) -> None:
+        """Called by MainWindow on app exit."""
+        try:
+            st = load_settings()
+        except Exception:
+            st = {}
+
+        if st.get("close_x11_procs_on_exit", True):
+            for p in list(self._bg_procs):
+                try:
+                    if p.state() != QProcess.ProcessState.NotRunning:
+                        p.terminate()
+                        p.waitForFinished(1000)
+                except Exception:
+                    pass
+            self._bg_procs.clear()
+
+        if st.get("close_vcxsrv_on_exit", True):
+            try:
+                stop_x_server_started_by_app(log=self.append_console)
+            except Exception:
+                pass
 
     # ---- public helpers
     def append_console(self, msg: str) -> None:
@@ -301,6 +358,21 @@ class LoginWidget(QWidget):
             QMessageBox.warning(self, "Hata", "Host ve kullanıcı adı gerekli.")
             return
 
+        # X11 preflight: if X11 forwarding is enabled and the user asked for
+        # auto dependency management, ensure plink and VcXsrv are available
+        # BEFORE connecting.
+        if cfg.x11_forwarding and (not cfg.dry_run) and self.cb_x11_autodeps.isChecked():
+            # plink.exe is required for password-based X11 (and is the most
+            # reliable standalone path for Windows).
+            if not ensure_plink_available(log=self.append_console, parent=self):
+                QMessageBox.warning(self, "X11", "X11 için plink.exe gerekli ancak hazırlanamadı.")
+                return
+
+            # Ensure local X server (VcXsrv) is running and TCP 6000 is open.
+            if not ensure_x_server_running(self.append_console, parent=self, allow_download=True):
+                QMessageBox.warning(self, "X11", "X11 için VcXsrv başlatılamadı. (Firewall/izin olabilir)")
+                return
+
         self.append_console(f"Bağlanılıyor: {cfg.username}@{cfg.host}:{cfg.port}")
         try:
             if cfg.dry_run:
@@ -335,11 +407,20 @@ class LoginWidget(QWidget):
         self.session_changed.emit(self._session)
 
     def run_command(self) -> None:
+        # Button compatibility: TerminalInput handles history + clear
+        if hasattr(self.cmd_in, 'submit_current'):
+            self.cmd_in.submit_current()
+            return
         cmd = self.cmd_in.text().strip()
         if not cmd:
             return
         self.cmd_in.clear()
+        self.run_command_text(cmd)
 
+    def run_command_text(self, cmd: str) -> None:
+        cmd = (cmd or '').strip()
+        if not cmd:
+            return
         ssh = self._session.get("ssh")
         if not ssh:
             self.append_console("SSH bağlı değil (Mock modda komut çalıştırılmaz).")
