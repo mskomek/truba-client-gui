@@ -1,0 +1,38 @@
+{
+  "app": {
+    "title": "TRUBA Slurm Arayüzü"
+  },
+  "tabs": {
+    "login": "Bağlantı",
+    "jobs": "İşler",
+    "outputs": "Çıktılar",
+    "editor": "Script Editörü",
+    "x11": "X11"
+  },
+  "login": {
+    "host": "Sunucu / IP",
+    "port": "Port",
+    "username": "Kullanıcı Adı",
+    "password": "Şifre",
+    "ssh_key": "SSH Anahtar Dosyası (ops.)",
+    "browse": "Seç",
+    "x11_enable": "X11 Forwarding (GUI uygulamaları için)",
+    "dry_run": "Simülasyon / Dry-Run (TRUBA olmadan UI test)",
+    "connect": "Bağlan",
+    "disconnect": "Bağlantıyı Kes",
+    "status_disconnected": "Bağlı değil",
+    "status_connected": "Bağlı",
+    "status_mock": "Mock mod (simülasyon)"
+  },
+  "common": {
+    "ok": "Tamam",
+    "cancel": "İptal",
+    "error": "Hata",
+    "info": "Bilgi"
+  },
+  "placeholders": {
+    "host": "login.truba.gov.tr veya IP",
+    "remote_dir": "~/slurm_logs",
+    "script_path": "~/jobs/test.slurm"
+  }
+}

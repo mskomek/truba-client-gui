@@ -1,0 +1,5 @@
+Metadata-Version: 2.4
+Name: truba-slurm-gui
+Version: 0.1.0
+Requires-Python: >=3.10
+Requires-Dist: PySide6>=6.5
