@@ -1,85 +1,56 @@
 # TRUBA Client GUI (Unofficial)
 
-**TRUBA ve benzeri Slurm tabanlı HPC sistemlerinde** SSH + Slurm + (opsiyonel) X11 iş akışını tek bir arayüzde yönetmek için geliştirilmiş **istemci taraflı** bir GUI uygulamasıdır.
+A **client-side GUI application** developed to manage **SSH + Slurm + (optional) X11 workflows**
+in **TRUBA and similar Slurm-based HPC systems** from a single interface.
 
-> ⚠️ Bu yazılım **TRUBA'nın resmi bir aracı değildir**.  
-> TRUBA üzerinde veya **benzer Slurm/SSH altyapılarında** kullanılmak üzere geliştirilmiştir.
-
----
-
-## Özellikler
-
-- SSH oturum yönetimi (client-side)
-- Slurm job izleme / temel job işlemleri (squeue, sacct vb. üzerinden)
-- Remote dosya yöneticisi (kopyala/taşı/yapıştır, drag&drop, resume, progress/cancel, undo-move)
-- i18n: Türkçe / İngilizce
-- Merkezi log: `~/.truba_slurm_gui/app.log` (rotating)
-- X11 **arka planda**: `plink.exe -X` + `VcXsrv` (UI’de ayrı sekme yok)
+> ⚠️ This software is **NOT an official TRUBA tool**.  
+> It is intended for use on **TRUBA or similar Slurm/SSH-based infrastructures**.
 
 ---
 
-## Kurulum ve Çalıştırma
+## Features
 
-### Seçenek A — Standalone (EXE)  ✅ Önerilen
+- SSH session management (client-side)
+- Slurm job monitoring / basic job operations (via `squeue`, `sacct`, etc.)
+- Remote file manager (copy/move/paste, drag & drop, resume, progress/cancel, undo-move)
+- i18n: Turkish / English
+- Centralized logging: `~/.truba_slurm_gui/app.log` (rotating)
+- X11 runs **in the background**: `plink.exe -X` + `VcXsrv` (no dedicated X11 UI tab)
 
-Bu modda **Python kurmanız gerekmez**.
+---
 
-1) GitHub Releases’tan en güncel paketi indirin (Windows).  
-2) (Opsiyonel: X11 kullanacaksanız) **VcXsrv** kurun.  
-3) **PuTTY/plink** temin edin:
-   - `plink.exe` dosyasını uygulamanın yanına koyun **veya**
-   - uygulama ayarlarından `plink.exe` yolunu gösterin (varsa).
-4) EXE’yi çalıştırın.
+## Installation & Running
 
-**Dış bağımlılıklar (EXE içinde gelmez):**
+### Option A — Standalone (EXE)  ✅ Recommended
+
+In this mode, **Python is NOT required**.
+
+1) Download the latest package from **GitHub Releases** (Windows).  
+2) (Optional: if you will use X11) Install **VcXsrv**.  
+3) Obtain **PuTTY / plink**:
+   - Place `plink.exe` next to the application **or**
+   - Specify the `plink.exe` path in application settings (if available).
+4) Run the EXE.
+
+**External dependencies (NOT bundled in the EXE):**
 - `plink.exe` (PuTTY)
-- `VcXsrv` (X11 gerekiyorsa)
-- Kurumunuzun firewall/AV politikaları (bazı ortamlarda izin gerekebilir)
+- `VcXsrv` (required only for X11)
+- Institutional firewall / antivirus policies (may require permission in some environments)
 
 ---
 
-### Seçenek B — Kaynak Koddan (Developer / From Source)
+### Option B — From Source (Developer Mode)
 
-**Gereksinimler**
+**Requirements**
 - Windows 10/11
-- Python 3.10+ (önerilir)
-- (Opsiyonel) VcXsrv + plink.exe
+- Python 3.10+ (recommended)
+- (Optional) VcXsrv + plink.exe
 
-**Kurulum**
+**Setup**
 ```powershell
-# Proje kök dizininde
+# In the project root directory
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 
 pip install -r requirements.txt
-# veya: pip install -e .
-```
-
-**Çalıştırma**
-```powershell
-python -m truba_gui
-```
-
----
-
-## Dokümantasyon
-
-- Uygulama içinden: sol üstteki **Yardım (❓)** ikonuna tıklayın.
-- Dosya olarak:
-  - Türkçe: `src/truba_gui/docs/HELP_tr.md`
-  - English: `src/truba_gui/docs/HELP_en.md`
-
----
-
-## Güvenlik Notları
-
-- Şifre/token **history’ye yazılmaz**, UI’de gösterilmez.
-- Log’lara **secret** düşmez (komutlar loglanabilir ama parolalar loglanmaz).
-- X11 süreçleri uygulama kapanışında temizlenir; orphan süreçler korunmacı şekilde temizlenir.
-
----
-
-## Lisans / Katkı
-
-- Issue / PR: GitHub üzerinden
-- Bu proje **istemci taraflıdır**; TRUBA altyapısında değişiklik yapmaz.
+# or: pip install -e .
