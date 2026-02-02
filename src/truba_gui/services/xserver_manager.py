@@ -10,8 +10,11 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, Optional
 
+from truba_gui.core.i18n import t
+
 from truba_gui.services.vcxsrv_release_downloader import get_latest_vcxsrv_asset
 
+from truba_gui.core.paths import third_party_dir
 # Standalone goals:
 # - No PuTTY/MobaXterm required (we download plink/vcxsrv with explicit user consent elsewhere).
 # - For plink -X to work reliably on Windows, local X server must listen on TCP 127.0.0.1:6000 (DISPLAY :0).
@@ -20,6 +23,8 @@ from truba_gui.services.vcxsrv_release_downloader import get_latest_vcxsrv_asset
 _LOCK_PATH = Path.home() / ".truba_slurm_gui" / "vcxsrv_start.lock"
 _LAST_START_TS = 0.0
 _PID_PATH = Path.home() / ".truba_slurm_gui" / "vcxsrv_pid.txt"
+_STDOUT_LOG = Path.home() / ".truba_slurm_gui" / "vcxsrv_stdout.log"
+_STDERR_LOG = Path.home() / ".truba_slurm_gui" / "vcxsrv_stderr.log"
 
 
 def stop_x_server_started_by_app(log: Optional[Callable[[str], None]] = None) -> bool:
@@ -40,13 +45,19 @@ def stop_x_server_started_by_app(log: Optional[Callable[[str], None]] = None) ->
         return False
 
     try:
-        _log(log, f"VcXsrv kapatılıyor (pid={pid})")
+        _log(log, t("xserver.stopping").format(pid=pid))
         subprocess.run(
             ["taskkill", "/PID", str(pid), "/T", "/F"],
             capture_output=True,
             text=True,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
+        try:
+            from truba_gui.services.process_registry import unregister
+
+            unregister(pid)
+        except Exception:
+            pass
         return True
     finally:
         try:
@@ -80,8 +91,10 @@ def _project_root() -> Path:
     return Path(__file__).resolve().parents[1]  # .../truba_gui
 
 
+
+
 def _vcxsrv_dir() -> Path:
-    return _project_root() / "third_party" / "vcxsrv"
+    return third_party_dir() / "vcxsrv"
 
 
 def _find_xserver_exe(vc_dir: Path) -> Optional[Path]:
@@ -140,7 +153,7 @@ def _download_file(url: str, dest: Path, log: Optional[Callable[[str], None]] = 
             from PySide6.QtWidgets import QProgressDialog
             from PySide6.QtCore import Qt
 
-            progress = QProgressDialog("VcXsrv indiriliyor...", "İptal", 0, 100, parent)
+            progress = QProgressDialog(t("xserver.downloading"), t("common.cancel"), 0, 100, parent)
             progress.setWindowModality(Qt.WindowModality.ApplicationModal)
             progress.setMinimumDuration(0)
             progress.setValue(0)
@@ -168,14 +181,14 @@ def _download_file(url: str, dest: Path, log: Optional[Callable[[str], None]] = 
                 dest.unlink(missing_ok=True)
             except Exception:
                 pass
-            _log(log, "İndirme iptal edildi.")
+            _log(log, t("xserver.download_cancelled"))
             return False
 
         if progress is not None:
             progress.setValue(100)
         return True
     except Exception as e:
-        _log(log, f"İndirme hatası: {e}")
+        _log(log, t("xserver.download_error").format(err=e))
         return False
     finally:
         if progress is not None:
@@ -186,15 +199,15 @@ def _run_noadmin_installer(installer: Path, target_dir: Path, log: Optional[Call
     target_dir.mkdir(parents=True, exist_ok=True)
     try:
         cmd = [str(installer), "/S", f"/D={str(target_dir)}"]
-        _log(log, f"VcXsrv kurulumu başlatılıyor (sessiz): {cmd[0]}")
+        _log(log, t("xserver.install_start").format(exe=cmd[0]))
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         proc = subprocess.run(cmd, capture_output=True, text=True, creationflags=creationflags)
         if proc.returncode != 0:
-            _log(log, f"VcXsrv kurulum hatası (rc={proc.returncode}). STDERR: {proc.stderr.strip()}")
+            _log(log, t("xserver.install_error").format(rc=proc.returncode, stderr=proc.stderr.strip()))
             return False
         return True
     except Exception as e:
-        _log(log, f"VcXsrv kurulum exception: {e}")
+        _log(log, t("xserver.install_exception").format(err=e))
         return False
 
 
@@ -203,17 +216,12 @@ def _prompt_install(parent, log: Optional[Callable[[str], None]] = None) -> bool
 
     asset = get_latest_vcxsrv_asset()
     if not asset or not asset.download_url:
-        _log(log, "VcXsrv release bilgisi alınamadı. İnternet bağlantısını kontrol et.")
-        QMessageBox.warning(parent, "VcXsrv", "VcXsrv sürümü bulunamadı. İnternet bağlantısını kontrol edin.")
+        _log(log, t("xserver.release_failed_log"))
+        QMessageBox.warning(parent, t("xserver.prompt_title"), t("xserver.version_not_found"))
         return False
 
-    msg = (
-        "X11 penceresi açmak için Windows'ta bir X Server gerekir.\n\n"
-        f"İndirilecek dosya:\n  {asset.name}  ({asset.size/1024/1024:.1f} MB)\n"
-        "Kaynak: GitHub Releases (marchaesen/vcxsrv)\n\n"
-        "İndirip kurulsun mu?"
-    )
-    ret = QMessageBox.question(parent, "VcXsrv gerekli", msg, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+    msg = t("xserver.prompt_msg").format(name=asset.name, mb=asset.size/1024/1024)
+    ret = QMessageBox.question(parent, t("xserver.required_title"), msg, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
     if ret != QMessageBox.StandardButton.Yes:
         return False
 
@@ -222,7 +230,7 @@ def _prompt_install(parent, log: Optional[Callable[[str], None]] = None) -> bool
     download_dir.mkdir(parents=True, exist_ok=True)
     installer_path = download_dir / asset.name
 
-    _log(log, f"VcXsrv indiriliyor: {asset.download_url}")
+    _log(log, t("xserver.download_log").format(url=asset.download_url))
     if not _download_file(asset.download_url, installer_path, log=log, parent=parent):
         return False
 
@@ -232,11 +240,11 @@ def _prompt_install(parent, log: Optional[Callable[[str], None]] = None) -> bool
 
     xexe = _find_xserver_exe(vc_dir)
     if not xexe:
-        _log(log, "Kurulum bitti ama vcxsrv.exe/XWin.exe bulunamadı.")
-        QMessageBox.warning(parent, "VcXsrv", "Kurulum tamamlandı ancak vcxsrv.exe/XWin.exe bulunamadı.")
+        _log(log, t("xserver.missing_after_install"))
+        QMessageBox.warning(parent, t("xserver.prompt_title"), t("xserver.missing_after_install"))
         return False
 
-    _log(log, f"VcXsrv hazır: {xexe}")
+    _log(log, t("xserver.ready").format(path=xexe))
     return True
 
 
@@ -269,13 +277,13 @@ def ensure_x_server_running(
     xexe = _find_xserver_exe(vc_dir)
 
     if not xexe:
-        _log(log, "Yerel X server bulunamadı (vcxsrv.exe/XWin.exe).")
+        _log(log, t("xserver.local_not_found"))
         if allow_download and parent is not None:
             if _prompt_install(parent, log=log):
                 xexe = _find_xserver_exe(vc_dir)
 
     if not xexe:
-        _log(log, "VcXsrv yok. İndirme için kullanıcı onayı gerekiyor.")
+        _log(log, t("xserver.need_confirm_log"))
         return False
 
     # Single instance: cross-process lock
@@ -301,8 +309,8 @@ def ensure_x_server_running(
             creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
             log_dir = Path.home() / ".truba_slurm_gui"
             log_dir.mkdir(parents=True, exist_ok=True)
-            stdout_path = log_dir / "vcxsrv_stdout.log"
-            stderr_path = log_dir / "vcxsrv_stderr.log"
+            stdout_path = _STDOUT_LOG
+            stderr_path = _STDERR_LOG
             stdout_f = open(stdout_path, "ab", buffering=0)
             stderr_f = open(stderr_path, "ab", buffering=0)
 
@@ -317,7 +325,13 @@ def ensure_x_server_running(
             )
 
             _LAST_START_TS = time.time()
-            _log(log, f"VcXsrv başlatılıyor: {xexe.name} (pid={proc.pid})")
+            _log(log, t("xserver.starting").format(name=xexe.name, pid=proc.pid))
+            try:
+                from truba_gui.services.process_registry import register
+
+                register(proc.pid, kind="vcxsrv", cmd=" ".join(args))
+            except Exception:
+                pass
             try:
                 _PID_PATH.parent.mkdir(parents=True, exist_ok=True)
                 _PID_PATH.write_text(str(proc.pid), encoding="utf-8")
@@ -328,25 +342,22 @@ def ensure_x_server_running(
             # Wait for TCP 6000
             for _ in range(60):  # 6s
                 if _is_display_listening(display):
-                    _log(log, "VcXsrv hazır: 127.0.0.1:6000 dinliyor.")
+                    _log(log, t("xserver.ready_listen"))
                     return True
                 if proc.poll() is not None:
                     _log(
                         log,
-                        "X11: VcXsrv başlatıldı ama hemen kapandı.\n"
-                        "Detay: C:\\Users\\<user>\\.truba_slurm_gui\\vcxsrv_stderr.log"
+                        t("xserver.start_closed") + "\n" + t("xserver.details_log").format(path=str(_STDERR_LOG))
                     )
                     return False
                 time.sleep(0.1)
 
             _log(
                 log,
-                "X11: VcXsrv çalışıyor görünüyor ama 127.0.0.1:6000 açılmadı.\n"
-                "Windows Firewall engelliyor olabilir (ilk çalıştırmada izin verin).\n"
-                "Detay: C:\\Users\\<user>\\.truba_slurm_gui\\vcxsrv_stderr.log"
+                t("xserver.port_not_open") + "\n" + t("xserver.details_log").format(path=str(_STDERR_LOG))
             )
             return False
 
     except TimeoutError:
-        _log(log, "X11: VcXsrv start lock timeout (başka bir instance olabilir).")
+        _log(log, t("xserver.lock_timeout"))
         return False

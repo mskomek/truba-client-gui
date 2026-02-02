@@ -1,12 +1,12 @@
 from PySide6.QtWidgets import QMainWindow
-from core.i18n import t
-from ui.widgets.login_widget import LoginWidget
-from ui.main_window import MainWindow
+from truba_gui.core.i18n import t
+from truba_gui.ui.widgets.login_widget import LoginWidget
+from truba_gui.ui.main_window import MainWindow
 
 class ConnectionWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(t("app.title") + " - " + t("tabs.login") if t("tabs.login") != "[tabs.login]" else "Bağlantı")
+        self.setWindowTitle(f"{t('app.title')} - {t('tabs.login')}")
         self.login = LoginWidget()
         self.setCentralWidget(self.login)
 

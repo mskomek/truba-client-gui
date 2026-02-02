@@ -13,3 +13,6 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+truba_gui = ["assets/**/*.svg", "assets/**/*.png", "docs/*.md", "i18n/*.json"]

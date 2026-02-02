@@ -91,7 +91,7 @@ class X11Widget(QWidget):
 
     def _ensure_ready(self) -> bool:
         if not self.session or not self.session.get("connected"):
-            self.lbl.setText("Bağlantı yok. Önce bağlan.")
+            self.lbl.setText(t("common.no_connection"))
             return False
         cfg = self.session["cfg"]
         if not getattr(cfg, "x11_forwarding", False):

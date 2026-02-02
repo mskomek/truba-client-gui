@@ -7,7 +7,11 @@
     "editor": "Script Editörü",
     "x11": "X11",
     "jobs_outputs": "İşler & Çıktılar",
-    "directories": "Dizinler"
+    "directories": "Dizinler",
+    "logs": "Logs",
+    "connection": "Bağlantı",
+    "script_editor": "Script Editörü",
+    "dirs": "Dizinler"
   },
   "login": {
     "host": "Sunucu / IP",
@@ -30,13 +34,45 @@
     "console_placeholder": "Bağlantı ve SSH mesajları burada görünecek...",
     "terminal_cmd": "Komut",
     "terminal_send": "Çalıştır",
-    "job_finished": "İş bitti: {jobid}"
+    "job_finished": "İş bitti: {jobid}",
+    "command_placeholder": "Komut yaz ve Enter/Çalıştır",
+    "x11_autodeps_tip": "Bağlan'a basınca plink.exe ve VcXsrv kontrol edilir. Yoksa kullanıcı onayıyla indirilir ve başlatılır.",
+    "close_vcxsrv_tip": "TrubaGUI tarafından başlatılan VcXsrv varsa PID ile kapatılır.",
+    "close_x11_procs_tip": "TrubaGUI'nin başlattığı plink/ssh QProcess'leri terminate edilir.",
+    "err_title": "Hata",
+    "err_master_empty": "Ana parola boş olamaz.",
+    "err_master_mismatch": "Ana parolalar eşleşmiyor.",
+    "err_port_numeric": "Port sayısal olmalı.",
+    "err_master_wrong": "Ana parola yanlış veya kayıtlı şifre çözülemedi.",
+    "err_host_user_required": "Host ve kullanıcı adı gerekli.",
+    "x11_title": "X11",
+    "err_x11_plink_needed": "X11 için plink.exe gerekli ancak hazırlanamadı.",
+    "err_x11_vcxsrv_failed": "X11 için VcXsrv başlatılamadı. (Firewall/izin olabilir)",
+    "conn_error_title": "Bağlantı hatası",
+    "conn_error_prefix": "Bağlantı hatası: {err}",
+    "profile_name_label": "Profil adı",
+    "x11_autodeps_label": "X11 seçiliyken gerekli programları kontrol et/indir/başlat",
+    "close_vcxsrv_label": "Program kapanınca VcXsrv'i kapat",
+    "close_x11_procs_label": "Program kapanınca X11/SSH süreçlerini kapat",
+    "x11_finished": "[X11 bitti] code={code}",
+    "x11_started": "X11 başlatıldı:\n{cmd}\nBeklenen: pencere Windows'ta ayrı açılır.",
+    "cmd_error": "Komut hatası: {err}",
+    "stderr": "STDERR:\n{data}",
+    "save": "Kaydet",
+    "run_command": "Çalıştır",
+    "console_title": "Konsol"
   },
   "common": {
     "ok": "Tamam",
     "cancel": "İptal",
+    "yes": "Evet",
+    "no": "Hayır",
     "error": "Hata",
-    "info": "Bilgi"
+    "info": "Bilgi",
+    "no_connection": "Bağlantı yok.",
+    "details": "Detaylar",
+    "apply_all": "Tüm çakışmalara uygula",
+    "close": "Kapat"
   },
   "placeholders": {
     "host": "login.truba.gov.tr veya IP",
@@ -46,7 +82,8 @@
   "jobs": {
     "title": "İşler",
     "refresh": "Yenile",
-    "cancel": "İşi İptal Et"
+    "cancel": "İşi İptal Et",
+    "job_id": "Job ID"
   },
   "files": {
     "title": "Çıktılar",
@@ -63,6 +100,30 @@
   },
   "dirs": {
     "refresh": "Yenile",
+    "delete": "Sil",
+    "copy": "Kopyala",
+    "move": "Taşı",
+    "paste": "Yapıştır",
+    "paste_into": "Klasöre yapıştır",
+    "rename": "Yeniden adlandır",
+    "undo": "Geri Al",
+    "paste_from_local": "Yerelden Yapıştır",
+    "paste_from_local_into": "Yerelden klasöre yapıştır",
+    "paste_to_local": "Yerel'e Yapıştır",
+    "queue_title": "İşlem Kuyruğu",
+    "queue_current": "Şu an:",
+    "queue_pending": "Sıradaki:",
+    "progress_title": "Dosya işlemleri",
+    "progress_cancel": "İptal",
+    "cancelled": "İptal edildi.",
+    "conflict_title": "Çakışma",
+    "conflict_overwrite": "Üzerine yaz",
+    "conflict_skip": "Atla",
+    "conflict_rename": "Yeniden adlandır",
+    "conflict_cancel": "İptal",
+    "rename_title": "Yeniden adlandır",
+    "rename_label": "Yeni ad:",
+    "select_local_folder": "Yerel hedef klasörü seç",
     "path": "Dizin",
     "load_failed": "Dizin okunamadı",
     "tab_all": "Tümü",
@@ -82,7 +143,8 @@
     "upload": "Yükle",
     "download_selected": "Seçilenleri İndir",
     "current": "Dizin",
-    "tab_slurm": "Slurm"
+    "tab_slurm": "Slurm",
+    "unreadable": "Okunamadı: {err}"
   },
   "jobs_outputs": {
     "scratch_title": "Scratch (/arf/scratch)",
@@ -94,5 +156,62 @@
     "output_stderr": "Çıktı-2: Error",
     "open_out1": "Çıktı-1'de Aç",
     "open_out2": "Çıktı-2'de Aç"
+  },
+  "putty": {
+    "downloading": "plink.exe indiriliyor...",
+    "needed_title": "plink.exe gerekli",
+    "needed_msg": "X11 forwarding için Windows'ta 'plink.exe' gerekiyor.\n\nSebep: Parola ile X11 bağlantısı (OpenSSH+GUI/TTY kısıtı)\n\nİndirilecek dosya: plink.exe\nKaynak: {url}\n\nŞimdi indirilsin mi?",
+    "download_cancelled": "plink.exe indirme iptal edildi.",
+    "download_error": "plink.exe indirme hatası: {err}",
+    "missing_log": "plink.exe bulunamadı: {url}",
+    "downloading_log": "plink.exe indiriliyor: {url}",
+    "ready_log": "plink.exe hazır: {path}",
+    "parent_none_log": "plink.exe indirimi için kullanıcı onayı gerekiyor (parent=None)."
+  },
+  "xserver": {
+    "downloading": "VcXsrv indiriliyor...",
+    "download_cancelled": "İndirme iptal edildi.",
+    "download_error": "İndirme hatası: {err}",
+    "release_failed_log": "VcXsrv release bilgisi alınamadı. İnternet bağlantısını kontrol et.",
+    "version_not_found": "VcXsrv sürümü bulunamadı. İnternet bağlantısını kontrol edin.",
+    "prompt_title": "VcXsrv",
+    "prompt_msg": "İndirilecek dosya:\n  {name}  ({mb:.1f} MB)\n\nİndirip kurulsun mu?",
+    "stopping": "VcXsrv kapatılıyor (pid={pid})",
+    "install_start": "VcXsrv kurulumu başlatılıyor (sessiz): {exe}",
+    "install_error": "VcXsrv kurulum hatası (rc={rc}). STDERR: {stderr}",
+    "install_exception": "VcXsrv kurulum exception: {err}",
+    "required_title": "VcXsrv gerekli",
+    "download_log": "VcXsrv indiriliyor: {url}",
+    "missing_after_install": "Kurulum tamamlandı ancak vcxsrv.exe/XWin.exe bulunamadı.",
+    "ready": "VcXsrv hazır: {path}",
+    "need_confirm_log": "VcXsrv yok. İndirme için kullanıcı onayı gerekiyor.",
+    "starting": "VcXsrv başlatılıyor: {name} (pid={pid})",
+    "ready_listen": "VcXsrv hazır: 127.0.0.1:6000 dinliyor.",
+    "start_closed": "X11: VcXsrv başlatıldı ama hemen kapandı.",
+    "port_not_open": "X11: VcXsrv çalışıyor görünüyor ama 127.0.0.1:6000 açılmadı.",
+    "lock_timeout": "X11: VcXsrv start lock timeout (başka bir instance olabilir).",
+    "local_not_found": "Yerel X server bulunamadı (vcxsrv.exe/XWin.exe).",
+    "details_log": "Detay: {path}"
+  },
+  "errors": {
+    "permission_denied": "İzin yok (Permission denied).",
+    "no_space": "Disk dolu / Kota aşıldı (No space left / quota).",
+    "read_only": "Salt okunur dosya sistemi (Read-only file system).",
+    "operation_failed": "İşlem başarısız."
+  },
+  "language": {
+    "menu_title": "Dil",
+    "turkish": "Türkçe",
+    "english": "English"
+  },
+  "logs": {
+    "not_created": "Log dosyası henüz oluşmadı: {path}",
+    "read_failed": "Log okunamadı: {err}"
+  },
+  "help": {
+    "help_title": "Yardım",
+    "welcome_title": "Hoş Geldiniz",
+    "dont_show_again": "Bir daha gösterme",
+    "missing_help_text": "Yardım içeriği yüklenemedi."
   }
 }

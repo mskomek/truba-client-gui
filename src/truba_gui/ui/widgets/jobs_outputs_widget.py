@@ -127,6 +127,14 @@ class JobsOutputsWidget(QWidget):
         self.scratch_panel.set_dir(f"/arf/scratch/{user}" if user else "/arf/scratch")
         self.refresh_jobs()
 
+    def shutdown(self) -> None:
+        """Stop timers / live watchers (best-effort)."""
+        try:
+            if hasattr(self, "_live_timer") and self._live_timer:
+                self._live_timer.stop()
+        except Exception:
+            pass
+
     # ---------------- Jobs
     def refresh_jobs(self):
         if not self.session or not self.session.get("slurm"):
@@ -187,7 +195,7 @@ class JobsOutputsWidget(QWidget):
 
     def _activate_slurm_script(self, script_path: str):
         if not self.session or not self.session.get("files"):
-            QMessageBox.warning(self, t("common.error"), "Bağlantı yok.")
+            QMessageBox.warning(self, t("common.error"), t("common.no_connection"))
             return
         files = self.session["files"]
         try:

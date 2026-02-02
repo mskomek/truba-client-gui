@@ -5,6 +5,7 @@ from typing import Callable, Optional, Tuple
 
 import paramiko
 
+from truba_gui.core.logging import get_logger
 from truba_gui.services.command_history_store import is_sensitive_command
 
 
@@ -31,8 +32,15 @@ class SSHClientWrapper:
         self.client: Optional[paramiko.SSHClient] = None
         self.sftp = None
         self._log = logger or log_cb
+        self._filelog = get_logger("truba_gui.ssh")
 
     def log(self, msg: str) -> None:
+        # File log
+        try:
+            self._filelog.info(msg)
+        except Exception:
+            pass
+        # UI log (if provided)
         if self._log:
             try:
                 self._log(msg)

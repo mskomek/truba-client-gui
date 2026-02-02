@@ -43,12 +43,12 @@ class LogsWidget(QWidget):
     def refresh(self) -> None:
         p = log_path()
         if not p.exists():
-            self.txt.setPlainText("Log dosyası henüz oluşmadı: " + str(p))
+            self.txt.setPlainText(t("logs.not_created").format(path=str(p)))
             return
         try:
             data = p.read_text(encoding="utf-8", errors="replace")
         except Exception as e:
-            self.txt.setPlainText(f"Log okunamadı: {e}")
+            self.txt.setPlainText(t("logs.read_failed").format(err=str(e)))
             return
         # tail last ~4000 chars
         if len(data) > 4000:

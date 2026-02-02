@@ -44,6 +44,15 @@ class DirectoriesWidget(QWidget):
         self.panel_scratch.set_dir(f"/arf/scratch/{user}")
         self.panel_home.set_dir(f"/arf/home/{user}")
 
+    def shutdown(self) -> None:
+        """Best-effort shutdown for file operations (cancel in-flight batches)."""
+        for p in (getattr(self, "panel_scratch", None), getattr(self, "panel_home", None)):
+            try:
+                if p is not None and hasattr(p, "shutdown"):
+                    p.shutdown()
+            except Exception:
+                pass
+
     def on_open_file(self, path: str):
         # If directory, we don't support navigation yet (next step). For now ignore.
         if path.endswith("/"):
@@ -65,12 +74,12 @@ class DirectoriesWidget(QWidget):
 
         def do_download():
             if not self.session or not self.session.get("files"):
-                QMessageBox.warning(self, t("common.error"), "Bağlantı yok.")
+                QMessageBox.warning(self, t("common.error"), t("common.no_connection"))
                 return
             try:
                 content = self.session["files"].read_text(path)
             except Exception as e:
-                QMessageBox.warning(self, t("common.error"), f"Okunamadı: {e}")
+                QMessageBox.warning(self, t("common.error"), t("dirs.unreadable").format(err=e))
                 return
             save_path, _ = QFileDialog.getSaveFileName(self, t("dirs.save_as") if t("dirs.save_as") != "[dirs.save_as]" else "Farklı Kaydet")
             if not save_path:
@@ -86,7 +95,7 @@ class DirectoriesWidget(QWidget):
 
         def do_edit():
             if not self.session or not self.session.get("files"):
-                QMessageBox.warning(self, t("common.error"), "Bağlantı yok.")
+                QMessageBox.warning(self, t("common.error"), t("common.no_connection"))
                 return
             try:
                 content = self.session["files"].read_text(path)

@@ -46,7 +46,7 @@ class EditorWidget(QWidget):
 
     def load_path(self):
         if not self.session or not self.session.get("files"):
-            QMessageBox.warning(self, t("common.error"), "Bağlantı yok.")
+            QMessageBox.warning(self, t("common.error"), t("common.no_connection"))
             return
         path = self.path_in.text().strip()
         if not path:
@@ -60,7 +60,7 @@ class EditorWidget(QWidget):
 
     def save_path(self):
         if not self.session or not self.session.get("files"):
-            QMessageBox.warning(self, t("common.error"), "Bağlantı yok.")
+            QMessageBox.warning(self, t("common.error"), t("common.no_connection"))
             return
         path = self.path_in.text().strip()
         if not path:

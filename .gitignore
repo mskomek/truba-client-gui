@@ -1,4 +1,34 @@
-/src/truba_gui/third_party/vcxsrv/runtime/
-/TrubaGUI.zip
-/.continue/
-/.venv/
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# Build outputs
+dist/
+*.spec.bak
+*.manifest
+*.log
+
+# PyInstaller work dirs (if used)
+*.toc
+*.pkg
+*.pyz
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# App runtime data (user home)
+.truba_slurm_gui/
+
+# Do not commit third-party binaries (they are downloaded at runtime)
+src/truba_gui/third_party/
+third_party/
+/build/

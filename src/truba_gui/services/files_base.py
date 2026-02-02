@@ -61,3 +61,11 @@ class FilesBackend(ABC):
 
     def move(self, src_remote_path: str, dst_remote_path: str) -> None:
         raise NotImplementedError
+
+    def exists(self, remote_path: str) -> bool:
+        """Return True if remote_path exists."""
+        raise NotImplementedError
+
+    def is_dir(self, remote_path: str) -> bool:
+        """Return True if remote_path is a directory."""
+        raise NotImplementedError

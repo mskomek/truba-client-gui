@@ -35,13 +35,18 @@ def _package_root() -> Path:
 
 
 def _bundled_ssh() -> Optional[str]:
-    p = _package_root() / "third_party" / "openssh" / "ssh.exe"
-    return str(p) if p.exists() else None
+    # We do not ship OpenSSH. Prefer system ssh if available.
+    return shutil.which("ssh")
 
 
 def _bundled_plink() -> Optional[str]:
-    p = _package_root() / "third_party" / "putty" / "plink.exe"
-    return str(p) if p.exists() else None
+    # plink is downloaded on demand into the user data directory.
+    try:
+        from truba_gui.services.putty_manager import plink_path
+        p = plink_path()
+        return str(p) if p.exists() else None
+    except Exception:
+        return None
 
 
 def _find_ssh_program() -> Optional[str]:

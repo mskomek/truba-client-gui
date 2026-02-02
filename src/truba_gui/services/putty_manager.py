@@ -9,7 +9,7 @@ user to install PuTTY/MobaXterm. For password-based SSH, Windows OpenSSH is not
 practical from a GUI (no TTY), so we rely on **plink.exe**.
 
 This module ensures a usable plink.exe exists under:
-    src/truba_gui/third_party/putty/plink.exe
+    ~/.truba_slurm_gui/third_party/putty/plink.exe
 
 We download a single executable on demand (first use).
 """
@@ -19,12 +19,17 @@ import urllib.request
 from pathlib import Path
 from typing import Callable, Optional
 
+from truba_gui.core.i18n import t
+
 
 PUTTY_PLINK_URL = "https://the.earth.li/~sgtatham/putty/latest/w64/plink.exe"
 
 
+from truba_gui.core.paths import third_party_dir
+
+
 def _project_root() -> Path:
-    # .../truba_gui/services/putty_manager.py -> .../truba_gui
+    # Kept for backward compatibility (no longer used for file paths).
     return Path(__file__).resolve().parents[1]
 
 
@@ -34,7 +39,7 @@ def _log(log: Optional[Callable[[str], None]], msg: str) -> None:
 
 
 def plink_path() -> Path:
-    return _project_root() / "third_party" / "putty" / "plink.exe"
+    return third_party_dir() / "putty" / "plink.exe"
 
 
 def _download(url: str, dest: Path, log: Optional[Callable[[str], None]] = None, parent=None) -> bool:
@@ -47,7 +52,7 @@ def _download(url: str, dest: Path, log: Optional[Callable[[str], None]] = None,
             from PySide6.QtWidgets import QProgressDialog
             from PySide6.QtCore import Qt
 
-            progress = QProgressDialog("plink.exe indiriliyor...", "İptal", 0, 100, parent)
+            progress = QProgressDialog(t("putty.downloading"), t("common.cancel"), 0, 100, parent)
             progress.setWindowModality(Qt.WindowModality.ApplicationModal)
             progress.setMinimumDuration(0)
             progress.setValue(0)
@@ -75,14 +80,14 @@ def _download(url: str, dest: Path, log: Optional[Callable[[str], None]] = None,
                 dest.unlink(missing_ok=True)
             except Exception:
                 pass
-            _log(log, "plink.exe indirme iptal edildi.")
+            _log(log, t("putty.download_cancelled"))
             return False
 
         if progress is not None:
             progress.setValue(100)
         return True
     except Exception as e:
-        _log(log, f"plink.exe indirme hatası: {e}")
+        _log(log, t("putty.download_error").format(err=e))
         return False
     finally:
         if progress is not None:
@@ -97,15 +102,10 @@ def _prompt_download_plink(parent) -> bool:
     except Exception:
         return False
 
-    msg = (
-        "X11 forwarding için Windows'ta 'plink.exe' gerekiyor.\n\n"
-        "Sebep: Parola ile X11 bağlantısı (OpenSSH+GUI/TTY kısıtı)\n\n"
-        f"İndirilecek dosya: plink.exe\nKaynak: {PUTTY_PLINK_URL}\n\n"
-        "Şimdi indirilsin mi?"
-    )
+    msg = t("putty.needed_msg").format(url=PUTTY_PLINK_URL)
     ret = QMessageBox.question(
         parent,
-        "plink.exe gerekli",
+        t("putty.needed_title"),
         msg,
         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
     )
@@ -122,19 +122,19 @@ def ensure_plink_available(*, log: Optional[Callable[[str], None]] = None, paren
     if dest.exists():
         return True
 
-    _log(log, f"plink.exe bulunamadı: {PUTTY_PLINK_URL}")
+    _log(log, t("putty.missing_log").format(url=PUTTY_PLINK_URL))
 
     if parent is None:
-        _log(log, "plink.exe indirimi için kullanıcı onayı gerekiyor (parent=None).")
+        _log(log, t("putty.parent_none_log"))
         return False
 
     if not _prompt_download_plink(parent):
-        _log(log, "plink.exe indirme iptal edildi.")
+        _log(log, t("putty.download_cancelled"))
         return False
 
-    _log(log, f"plink.exe indiriliyor: {PUTTY_PLINK_URL}")
+    _log(log, t("putty.downloading_log").format(url=PUTTY_PLINK_URL))
     ok = _download(PUTTY_PLINK_URL, dest, log=log, parent=parent)
     if ok and dest.exists():
-        _log(log, f"plink.exe hazır: {dest}")
+        _log(log, t("putty.ready_log").format(path=dest))
         return True
     return False

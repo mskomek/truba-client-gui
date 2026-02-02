@@ -102,3 +102,24 @@ def get_last_profile_name() -> Optional[str]:
     cfg = load_config()
     v = cfg.get("last_profile")
     return v if isinstance(v, str) and v.strip() else None
+
+
+def get_ui_pref_bool(key: str, default: bool = True) -> bool:
+    cfg = load_config()
+    ui = cfg.get("ui", {})
+    if not isinstance(ui, dict):
+        ui = {}
+    v = ui.get(key)
+    if isinstance(v, bool):
+        return v
+    return default
+
+
+def set_ui_pref_bool(key: str, value: bool) -> None:
+    cfg = load_config()
+    ui = cfg.get("ui", {})
+    if not isinstance(ui, dict):
+        ui = {}
+    ui[key] = bool(value)
+    cfg["ui"] = ui
+    save_config(cfg)

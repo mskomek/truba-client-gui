@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import stat as pystat
 from typing import List, Tuple
 
@@ -11,6 +12,12 @@ class SSHFilesBackend(FilesBackend):
         if not ssh.sftp:
             raise RuntimeError("SFTP not available")
         self.ssh = ssh
+
+        # Edge-case notes (for maintainers):
+        # - NFS "stale file handle" can occur after scratch purge; operations may fail
+        #   even if paths look valid.
+        # - Quota can be exceeded even when `df -h` looks fine (home/scratch policies).
+        # - Permission issues can be subtle (directory has r/w but missing execute bit).
 
     def listdir(self, remote_dir: str) -> List[str]:
         return self.ssh.sftp.listdir(remote_dir)
@@ -44,9 +51,72 @@ class SSHFilesBackend(FilesBackend):
         return int(getattr(st, "st_size", 0) or 0), int(getattr(st, "st_mtime", 0) or 0)
 
     def download(self, remote_path: str, local_path: str) -> None:
+        """Download a remote file.
+
+        Resume behavior:
+        - If local_path exists and is smaller than the remote size, resume from local size.
+        - If sizes match, do nothing.
+        - Otherwise, overwrite.
+        """
+        remote_size, _ = self.stat(remote_path)
+        local_size = 0
+        try:
+            local_size = os.path.getsize(local_path)
+        except Exception:
+            local_size = 0
+
+        if local_size == remote_size and remote_size > 0:
+            return
+
+        # Resume only when local is a strict prefix of remote.
+        if 0 < local_size < remote_size:
+            with self.ssh.sftp.open(remote_path, "rb") as rf:
+                rf.seek(local_size)
+                os.makedirs(os.path.dirname(local_path) or ".", exist_ok=True)
+                with open(local_path, "ab") as lf:
+                    while True:
+                        chunk = rf.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        lf.write(chunk)
+            return
+
+        # Overwrite
+        os.makedirs(os.path.dirname(local_path) or ".", exist_ok=True)
         self.ssh.sftp.get(remote_path, local_path)
 
     def upload(self, local_path: str, remote_path: str) -> None:
+        """Upload a local file.
+
+        Resume behavior:
+        - If remote_path exists and is smaller than the local size, resume from remote size.
+        - If sizes match, do nothing.
+        - Otherwise, overwrite.
+        """
+        local_size = os.path.getsize(local_path)
+        remote_size = 0
+        try:
+            remote_size, _ = self.stat(remote_path)
+        except Exception:
+            remote_size = 0
+
+        if remote_size == local_size and local_size > 0:
+            return
+
+        # Resume only when remote is a strict prefix of local.
+        if 0 < remote_size < local_size:
+            with open(local_path, "rb") as lf:
+                lf.seek(remote_size)
+                # append to remote file
+                with self.ssh.sftp.open(remote_path, "ab") as rf:
+                    while True:
+                        chunk = lf.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        rf.write(chunk)
+            return
+
+        # Overwrite
         self.ssh.sftp.put(local_path, remote_path)
 
     def remove(self, remote_path: str, recursive: bool = False) -> None:
@@ -69,6 +139,21 @@ class SSHFilesBackend(FilesBackend):
         code, _, err = self.ssh.run(f"mkdir -p {q}")
         if code != 0:
             raise RuntimeError(err.strip() or f"mkdir failed (exit={code})")
+
+
+    def exists(self, remote_path: str) -> bool:
+        try:
+            self.ssh.sftp.stat(remote_path)
+            return True
+        except Exception:
+            return False
+
+    def is_dir(self, remote_path: str) -> bool:
+        try:
+            st = self.ssh.sftp.stat(remote_path)
+            return pystat.S_ISDIR(getattr(st, "st_mode", 0) or 0)
+        except Exception:
+            return False
 
     def copy(self, src_remote_path: str, dst_remote_path: str, recursive: bool = False) -> None:
         import shlex

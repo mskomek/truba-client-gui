@@ -66,15 +66,17 @@ class LoginWidget(QWidget):
         self.cb_x11 = QCheckBox(t("login.x11_enable") if t("login.x11_enable") != "[login.x11_enable]" else "X11 Forwarding")
 
         # X11 preflight / lifecycle settings (app-wide)
-        self.cb_x11_autodeps = QCheckBox("X11 seçiliyken gerekli programları kontrol et/indir/başlat")
-        self.cb_x11_autodeps.setToolTip("Bağlan'a basınca plink.exe ve VcXsrv kontrol edilir. Yoksa kullanıcı onayıyla indirilir ve başlatılır.")
+        self.cb_x11_autodeps = QCheckBox(t("login.x11_autodeps_label"))
+        self.cb_x11_autodeps.setToolTip(t("login.x11_autodeps_tip"))
 
-        self.cb_close_vcxsrv_on_exit = QCheckBox("Program kapanınca VcXsrv'i kapat")
-        self.cb_close_vcxsrv_on_exit.setToolTip("TrubaGUI tarafından başlatılan VcXsrv varsa PID ile kapatılır.")
+        self.cb_close_vcxsrv_on_exit = QCheckBox(t("login.close_vcxsrv_label"))
+        self.cb_close_vcxsrv_on_exit.setToolTip(t("login.close_vcxsrv_tip"))
 
-        self.cb_close_x11_procs_on_exit = QCheckBox("Program kapanınca X11/SSH süreçlerini kapat")
-        self.cb_close_x11_procs_on_exit.setToolTip("TrubaGUI'nin başlattığı plink/ssh QProcess'leri terminate edilir.")
-        self.cb_dry = QCheckBox(t("login.dry_run") if t("login.dry_run") != "[login.dry_run]" else "Simülasyon / Dry-Run")
+        self.cb_close_x11_procs_on_exit = QCheckBox(t("login.close_x11_procs_label"))
+        self.cb_close_x11_procs_on_exit.setToolTip(t("login.close_x11_procs_tip"))
+
+        # Simulation / dry-run option removed from UI.
+        # (If a legacy profile contains a 'dry_run' field, it is ignored.)
 
         self.btn_save = QPushButton(t("login.save") if t("login.save") != "[login.save]" else "Kaydet")
         self.btn_save.clicked.connect(self.save_profile)
@@ -88,13 +90,11 @@ class LoginWidget(QWidget):
         self.console = QTextEdit()
         self.console.setReadOnly(True)
         ph = t("login.console_placeholder")
-        if ph.startswith("["):
-            ph = "Bağlantı ve SSH mesajları burada görünecek..."
         self.console.setPlaceholderText(ph)
 
         # ---- SSH terminal line
         self.cmd_in = TerminalInput()
-        self.cmd_in.setPlaceholderText(t("login.command_placeholder") if t("login.command_placeholder") != "[login.command_placeholder]" else "Komut yaz ve Enter/Çalıştır")
+        self.cmd_in.setPlaceholderText(t("login.command_placeholder"))
         self.btn_run_cmd = QPushButton(t("login.run_command") if t("login.run_command") != "[login.run_command]" else "Çalıştır")
         self.btn_run_cmd.clicked.connect(self.cmd_in.submit_current)
         self.cmd_in.command_submitted.connect(self.run_command_text)
@@ -104,7 +104,7 @@ class LoginWidget(QWidget):
         cmd_row.addWidget(self.btn_run_cmd)
 
         form = QFormLayout()
-        form.addRow("Profil Adı", self.profile_name)
+        form.addRow(t("login.profile_name_label"), self.profile_name)
         form.addRow(t("login.host"), self.host)
         form.addRow(t("login.port"), self.port)
         form.addRow(t("login.username"), self.username)
@@ -128,7 +128,7 @@ class LoginWidget(QWidget):
         right_lay.addWidget(self.cb_x11_autodeps)
         right_lay.addWidget(self.cb_close_vcxsrv_on_exit)
         right_lay.addWidget(self.cb_close_x11_procs_on_exit)
-        right_lay.addWidget(self.cb_dry)
+        # (dry-run removed)
         right_lay.addLayout(btn_row)
         right_lay.addWidget(self.status_label)
         right_lay.addWidget(QLabel(t("login.console_title") if t("login.console_title") != "[login.console_title]" else "Konsol"))
@@ -181,6 +181,14 @@ class LoginWidget(QWidget):
                         p.waitForFinished(1000)
                 except Exception:
                     pass
+                try:
+                    from truba_gui.services.process_registry import unregister
+
+                    pid = int(p.processId() or 0)
+                    if pid:
+                        unregister(pid)
+                except Exception:
+                    pass
             self._bg_procs.clear()
 
         if st.get("close_vcxsrv_on_exit", True):
@@ -188,6 +196,23 @@ class LoginWidget(QWidget):
                 stop_x_server_started_by_app(log=self.append_console)
             except Exception:
                 pass
+
+        # Wipe connection secrets from in-memory session (best-effort).
+        try:
+            cfg = self._session.get("cfg") if hasattr(self, "_session") else None
+            if cfg is not None:
+                try:
+                    cfg.password = ""
+                except Exception:
+                    pass
+            ssh = self._session.get("ssh") if hasattr(self, "_session") else None
+            if ssh is not None and getattr(ssh, "info", None) is not None:
+                try:
+                    ssh.info.password = ""
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     # ---- public helpers
     def append_console(self, msg: str) -> None:
@@ -224,7 +249,7 @@ class LoginWidget(QWidget):
         self.username.setText(prof.get("username", ""))
         self.key_path.setText(prof.get("key_path", ""))
         self.cb_x11.setChecked(bool(prof.get("x11_forwarding", False)))
-        self.cb_dry.setChecked(bool(prof.get("dry_run", False)))
+        # legacy field: prof.get("dry_run") ignored
 
         save_pw = bool(prof.get("save_password", False))
         self.cb_save_password.setChecked(save_pw)
@@ -244,7 +269,7 @@ class LoginWidget(QWidget):
             return None
         pw = (pw or "").strip()
         if not pw:
-            QMessageBox.warning(self, "Hata", "Ana parola boş olamaz.")
+            QMessageBox.warning(self, t("login.err_title"), t("login.err_master_empty"))
             return None
         if confirm:
             pw2, ok2 = QInputDialog.getText(
@@ -256,7 +281,7 @@ class LoginWidget(QWidget):
             if not ok2:
                 return None
             if pw2 != pw:
-                QMessageBox.warning(self, "Hata", "Ana parolalar eşleşmiyor.")
+                QMessageBox.warning(self, t("login.err_title"), t("login.err_master_mismatch"))
                 return None
         return pw
 
@@ -275,7 +300,7 @@ class LoginWidget(QWidget):
         try:
             port = int(self.port.text().strip() or "22")
         except ValueError:
-            QMessageBox.warning(self, "Hata", "Port sayısal olmalı.")
+            QMessageBox.warning(self, t("login.err_title"), t("login.err_port_numeric"))
             return
 
         prof = {
@@ -285,7 +310,7 @@ class LoginWidget(QWidget):
             "username": self.username.text().strip(),
             "key_path": self.key_path.text().strip(),
             "x11_forwarding": self.cb_x11.isChecked(),
-            "dry_run": self.cb_dry.isChecked(),
+            # dry_run removed
             "save_password": self.cb_save_password.isChecked(),
         }
 
@@ -325,7 +350,7 @@ class LoginWidget(QWidget):
         try:
             port = int(self.port.text().strip() or "22")
         except ValueError:
-            QMessageBox.warning(self, "Hata", "Port sayısal olmalı.")
+            QMessageBox.warning(self, t("login.err_title"), t("login.err_port_numeric"))
             return
 
         # If password is not typed but profile has encrypted password, ask master and decrypt.
@@ -341,7 +366,7 @@ class LoginWidget(QWidget):
                     try:
                         password = decrypt_with_master(master, prof["password_enc"], prof["password_salt"])
                     except Exception:
-                        QMessageBox.critical(self, "Hata", "Ana parola yanlış veya kayıtlı şifre çözülemedi.")
+                        QMessageBox.critical(self, t("login.err_title"), t("login.err_master_wrong"))
                         return
 
         cfg = SSHConfig(
@@ -351,11 +376,11 @@ class LoginWidget(QWidget):
             password=password,
             key_path=self.key_path.text().strip(),
             x11_forwarding=self.cb_x11.isChecked(),
-            dry_run=self.cb_dry.isChecked(),
+            dry_run=False,
         )
 
         if not cfg.host or not cfg.username:
-            QMessageBox.warning(self, "Hata", "Host ve kullanıcı adı gerekli.")
+            QMessageBox.warning(self, t("login.err_title"), t("login.err_host_user_required"))
             return
 
         # X11 preflight: if X11 forwarding is enabled and the user asked for
@@ -365,12 +390,12 @@ class LoginWidget(QWidget):
             # plink.exe is required for password-based X11 (and is the most
             # reliable standalone path for Windows).
             if not ensure_plink_available(log=self.append_console, parent=self):
-                QMessageBox.warning(self, "X11", "X11 için plink.exe gerekli ancak hazırlanamadı.")
+                QMessageBox.warning(self, t("login.x11_title"), t("login.err_x11_plink_needed"))
                 return
 
             # Ensure local X server (VcXsrv) is running and TCP 6000 is open.
             if not ensure_x_server_running(self.append_console, parent=self, allow_download=True):
-                QMessageBox.warning(self, "X11", "X11 için VcXsrv başlatılamadı. (Firewall/izin olabilir)")
+                QMessageBox.warning(self, t("login.x11_title"), t("login.err_x11_vcxsrv_failed"))
                 return
 
         self.append_console(f"Bağlanılıyor: {cfg.username}@{cfg.host}:{cfg.port}")
@@ -398,8 +423,8 @@ class LoginWidget(QWidget):
                 self.append_console("SSH bağlantısı kuruldu.")
         except Exception as e:
             self.status_label.setText(t("login.status_disconnected") if t("login.status_disconnected") != "[login.status_disconnected]" else "Bağlı değil")
-            self.append_console(f"Bağlantı hatası: {e}")
-            QMessageBox.critical(self, "Bağlantı hatası", str(e))
+            self.append_console(t("login.conn_error_prefix").format(err=e))
+            QMessageBox.critical(self, t("login.conn_error_title"), str(e))
             return
 
         self._session = {"connected": True, "cfg": cfg, "ssh": ssh, "slurm": slurm, "files": files}
@@ -450,8 +475,8 @@ class LoginWidget(QWidget):
                 self.append_console(
                     "X11 başlatıcı bulunamadı. Windows'ta ssh.exe (OpenSSH) veya plink.exe (PuTTY) gerekli.\n"
                     "Tam standalone için (opsiyonel):\n"
-                    " - src/truba_gui/third_party/openssh/ssh.exe\n"
-                    " - src/truba_gui/third_party/putty/plink.exe"
+                    " - Windows OpenSSH (system) or ~/.truba_slurm_gui/third_party/putty/plink.exe\n"
+                    " - ~/.truba_slurm_gui/third_party/putty/plink.exe (auto-download)"
                 )
                 return
 
@@ -471,15 +496,35 @@ class LoginWidget(QWidget):
             proc.readyReadStandardError.connect(lambda: self._append_process_io(proc, err=True))
             proc.readyReadStandardOutput.connect(lambda: self._append_process_io(proc, err=False))
             def _on_finished(code, _status):
-                self.append_console(f"[X11 bitti] code={code}")
+                self.append_console(t("login.x11_finished").format(code=code))
                 try:
                     self._bg_procs.remove(proc)
                 except Exception:
                     pass
+                try:
+                    from truba_gui.services.process_registry import unregister
+
+                    pid = int(proc.processId() or 0)
+                    if pid:
+                        unregister(pid)
+                except Exception:
+                    pass
             proc.finished.connect(_on_finished)
 
+            # Register PID for orphan guard (best-effort; log-only)
+            def _on_started():
+                try:
+                    from truba_gui.services.process_registry import register
+
+                    pid = int(proc.processId() or 0)
+                    if pid:
+                        register(pid, kind=f"x11_{launch.backend}", cmd=cmd_show)
+                except Exception:
+                    pass
+            proc.started.connect(_on_started)
+
             cmd_show = " ".join([launch.program] + launch.args)
-            self.append_console("X11 başlatıldı:\n" + cmd_show + "\nBeklenen: pencere Windows'ta ayrı açılır.")
+            self.append_console(t("login.x11_started").format(cmd=cmd_show))
             self._bg_procs.append(proc)
             proc.start()
 
@@ -491,12 +536,33 @@ class LoginWidget(QWidget):
             ssh.run(cmd)
             append_event({"type": "ssh_cmd", "cmd": cmd})
         except Exception as e:
-            self.append_console(f"Komut hatası: {e}")
+            self.append_console(t("login.cmd_error").format(err=e))
 
     def _append_process_io(self, proc: QProcess, *, err: bool) -> None:
         data = bytes(proc.readAllStandardError() if err else proc.readAllStandardOutput()).decode(errors="replace")
         if data.strip():
             if err:
-                self.append_console("STDERR:\n" + data.rstrip())
+                self.append_console(t("login.stderr").format(data=data.rstrip()))
             else:
                 self.append_console(data.rstrip())
+
+    def retranslate_ui(self):
+        """Update user-facing texts when language changes."""
+        try:
+            self.cb_x11.setText(t("login.x11_enable"))
+            # dry-run removed
+            self.cb_save_password.setText(t("login.save_password"))
+            self.btn_browse_key.setText(t("login.browse"))
+            self.btn_save.setText(t("login.save"))
+            self.btn_connect.setText(t("login.connect") if not getattr(self, "_connected", False) else t("login.disconnect"))
+            self.cb_x11_autodeps.setText(t("login.x11_autodeps_label"))
+            self.cb_x11_autodeps.setToolTip(t("login.x11_autodeps_tip"))
+            self.cb_close_vcxsrv_on_exit.setText(t("login.close_vcxsrv_label"))
+            self.cb_close_vcxsrv_on_exit.setToolTip(t("login.close_vcxsrv_tip"))
+            self.cb_close_x11_procs_on_exit.setText(t("login.close_x11_procs_label"))
+            self.cb_close_x11_procs_on_exit.setToolTip(t("login.close_x11_procs_tip"))
+            self.console.setPlaceholderText(t("login.console_placeholder"))
+            self.cmd_in.setPlaceholderText(t("login.command_placeholder"))
+            self.btn_run_cmd.setText(t("login.run_command"))
+        except Exception:
+            pass

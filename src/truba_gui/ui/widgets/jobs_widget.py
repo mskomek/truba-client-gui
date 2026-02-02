@@ -15,7 +15,7 @@ class JobsWidget(QWidget):
         self.btn_refresh.clicked.connect(self.refresh)
 
         self.cancel_id = QLineEdit()
-        self.cancel_id.setPlaceholderText("Job ID")
+        self.cancel_id.setPlaceholderText(t("jobs.job_id"))
         self.btn_cancel = QPushButton(t("jobs.cancel") if t("jobs.cancel") != "[jobs.cancel]" else "İşi İptal Et")
         self.btn_cancel.clicked.connect(self.cancel)
 
@@ -35,7 +35,7 @@ class JobsWidget(QWidget):
 
     def refresh(self):
         if not self.session or not self.session.get("slurm"):
-            self.out.setPlainText("Bağlantı yok.")
+            self.out.setPlainText(t("common.no_connection"))
             return
         user = self.session["cfg"].username
         text = self.session["slurm"].squeue(user)
