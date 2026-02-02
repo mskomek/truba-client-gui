@@ -1,9 +1,4 @@
-Tamam 👍
-Aşağıda verdiğin içeriği **bozmadan**, sadece **Markdown yapısını düzelterek**, başlıkları ve kod bloklarını **GitHub README standardına uygun** hale getirip **tek parça** olarak geri veriyorum.
 
-Bunu **birebir `README.md`** olarak kopyalayıp kullanabilirsin.
-
----
 
 ````md
 # TRUBA Client GUI (Unofficial)
