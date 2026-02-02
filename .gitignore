@@ -34,3 +34,6 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+/build/
+/TrubaGUI.zip
+/.continue/
