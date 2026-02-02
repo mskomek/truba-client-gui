@@ -1,3 +1,11 @@
+Tamam 👍
+Aşağıda verdiğin içeriği **bozmadan**, sadece **Markdown yapısını düzelterek**, başlıkları ve kod bloklarını **GitHub README standardına uygun** hale getirip **tek parça** olarak geri veriyorum.
+
+Bunu **birebir `README.md`** olarak kopyalayıp kullanabilirsin.
+
+---
+
+````md
 # TRUBA Client GUI (Unofficial)
 
 A **client-side GUI application** developed to manage **SSH + Slurm + (optional) X11 workflows**
@@ -41,44 +49,46 @@ In this mode, **Python is NOT required**.
 
 ### Option B — From Source (Developer Mode)
 
-**Requirements**
-- Windows 10/11
+#### Requirements
+- Windows 10 / 11
 - Python 3.10+ (recommended)
 - (Optional) VcXsrv + plink.exe
 
-**Setup**
+#### Setup
 ```powershell
 # In the project root directory
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 
 pip install -r requirements.txt
-# or: pip install -e .
+# or:
+pip install -e .
+````
 
-Run
+#### Run
 
 python -m truba_gui
 
-Documentation
 
-From within the application: click the Help (❓) icon in the top-left corner.
 
-As files:
 
-Turkish: src/truba_gui/docs/HELP_tr.md
+## Documentation
 
-English: src/truba_gui/docs/HELP_en.md
+* From within the application: click the **Help (❓)** icon in the top-left corner.
+* As files:
 
-Security Notes
+  * Turkish: `src/truba_gui/docs/HELP_tr.md`
+  * English: `src/truba_gui/docs/HELP_en.md`
 
-Passwords / tokens are never written to history and never shown in the UI.
 
-Secrets are never logged (commands may be logged, but credentials are not).
+## Security Notes
 
-X11 processes are cleaned up on application exit; orphan processes are handled defensively.
+* Passwords / tokens are **never written to history** and **never shown in the UI**.
+* Secrets are **never logged** (commands may be logged, but credentials are not).
+* X11 processes are cleaned up on application exit; orphan processes are handled defensively.
 
-License / Contributions
 
-Issues / PRs: via GitHub
+## License / Contributions
 
-This project is client-side only; it does NOT modify the TRUBA infrastructure.
+* Issues / PRs: via GitHub
+* This project is **client-side only**; it does **NOT** modify the TRUBA infrastructure.
