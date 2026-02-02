@@ -1,56 +1,59 @@
+TRUBA Client GUI (Unofficial)
 
+A client-side GUI application developed to manage SSH + Slurm + (optional) X11 workflows from a single interface on TRUBA and similar Slurm-based HPC systems.
 
-````md
-# TRUBA Client GUI (Unofficial)
+⚠️ This software is NOT an official TRUBA tool.
+It is developed for use on TRUBA or similar Slurm/SSH-based infrastructures.
 
-A **client-side GUI application** developed to manage **SSH + Slurm + (optional) X11 workflows**
-in **TRUBA and similar Slurm-based HPC systems** from a single interface.
+Features
 
-> ⚠️ This software is **NOT an official TRUBA tool**.  
-> It is intended for use on **TRUBA or similar Slurm/SSH-based infrastructures**.
+SSH session management (client-side)
 
----
+Slurm job monitoring / basic job operations (via squeue, sacct, etc.)
 
-## Features
+Remote file manager (copy / move / paste, drag & drop, resume, progress / cancel, undo-move)
 
-- SSH session management (client-side)
-- Slurm job monitoring / basic job operations (via `squeue`, `sacct`, etc.)
-- Remote file manager (copy/move/paste, drag & drop, resume, progress/cancel, undo-move)
-- i18n: Turkish / English
-- Centralized logging: `~/.truba_slurm_gui/app.log` (rotating)
-- X11 runs **in the background**: `plink.exe -X` + `VcXsrv` (no dedicated X11 UI tab)
+i18n: Turkish / English
 
----
+Centralized logging: ~/.truba_slurm_gui/app.log (rotating)
 
-## Installation & Running
+X11 runs in the background: plink.exe -X + VcXsrv (no dedicated X11 UI tab)
 
-### Option A — Standalone (EXE)  ✅ Recommended
+Installation & Running
+Option A — Standalone (EXE) ✅ Recommended
 
-In this mode, **Python is NOT required**.
+In this mode, Python is NOT required.
 
-1) Download the latest package from **GitHub Releases** (Windows).  
-2) (Optional: if you will use X11) Install **VcXsrv**.  
-3) Obtain **PuTTY / plink**:
-   - Place `plink.exe` next to the application **or**
-   - Specify the `plink.exe` path in application settings (if available).
-4) Run the EXE.
+Download the latest package from GitHub Releases (Windows).
 
-**External dependencies (NOT bundled in the EXE):**
-- `plink.exe` (PuTTY)
-- `VcXsrv` (required only for X11)
-- Institutional firewall / antivirus policies (may require permission in some environments)
+(Optional: if you will use X11) Install VcXsrv.
 
----
+Obtain PuTTY / plink:
 
-### Option B — From Source (Developer Mode)
+Place plink.exe next to the application or
 
-#### Requirements
-- Windows 10 / 11
-- Python 3.10+ (recommended)
-- (Optional) VcXsrv + plink.exe
+Specify the plink.exe path via application settings (if available).
 
-#### Setup
-```powershell
+Run the EXE.
+
+External dependencies (NOT bundled in the EXE):
+
+plink.exe (PuTTY)
+
+VcXsrv (required only for X11)
+
+Institutional firewall / antivirus policies (permissions may be required in some environments)
+
+Option B — From Source (Developer Mode)
+Requirements
+
+Windows 10 / 11
+
+Python 3.10+ (recommended)
+
+(Optional) VcXsrv + plink.exe
+
+Setup
 # In the project root directory
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -58,32 +61,30 @@ python -m venv .venv
 pip install -r requirements.txt
 # or:
 pip install -e .
-````
 
-#### Run
-
+Run
 python -m truba_gui
 
+Documentation
 
+From within the application: click the Help (❓) icon in the top-left corner.
 
+As files:
 
-## Documentation
+Turkish: src/truba_gui/docs/HELP_tr.md
 
-* From within the application: click the **Help (❓)** icon in the top-left corner.
-* As files:
+English: src/truba_gui/docs/HELP_en.md
 
-  * Turkish: `src/truba_gui/docs/HELP_tr.md`
-  * English: `src/truba_gui/docs/HELP_en.md`
+Security Notes
 
+Passwords / tokens are never written to history and never shown in the UI.
 
-## Security Notes
+Secrets are never logged (commands may be logged, but credentials are not).
 
-* Passwords / tokens are **never written to history** and **never shown in the UI**.
-* Secrets are **never logged** (commands may be logged, but credentials are not).
-* X11 processes are cleaned up on application exit; orphan processes are handled defensively.
+X11 processes are cleaned up on application exit; orphan processes are handled defensively.
 
+License / Contributions
 
-## License / Contributions
+Issues / PRs: via GitHub
 
-* Issues / PRs: via GitHub
-* This project is **client-side only**; it does **NOT** modify the TRUBA infrastructure.
+This project is client-side only; it does NOT modify the TRUBA infrastructure.
