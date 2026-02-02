@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
 )
 
 from truba_gui.core.i18n import t
+from truba_gui.core.ui_errors import show_exception
 from truba_gui.config.models import SSHConfig
 from truba_gui.config.storage import load_profiles, upsert_profile, load_settings, update_settings
 from truba_gui.core.history import append_event
@@ -424,7 +425,7 @@ class LoginWidget(QWidget):
         except Exception as e:
             self.status_label.setText(t("login.status_disconnected") if t("login.status_disconnected") != "[login.status_disconnected]" else "Bağlı değil")
             self.append_console(t("login.conn_error_prefix").format(err=e))
-            QMessageBox.critical(self, t("login.conn_error_title"), str(e))
+            show_exception(self, title=t("login.conn_error_title"), user_message=str(e), exc=e, area="SSH")
             return
 
         self._session = {"connected": True, "cfg": cfg, "ssh": ssh, "slurm": slurm, "files": files}
@@ -473,10 +474,9 @@ class LoginWidget(QWidget):
             )
             if not launch:
                 self.append_console(
-                    "X11 başlatıcı bulunamadı. Windows'ta ssh.exe (OpenSSH) veya plink.exe (PuTTY) gerekli.\n"
-                    "Tam standalone için (opsiyonel):\n"
-                    " - Windows OpenSSH (system) or ~/.truba_slurm_gui/third_party/putty/plink.exe\n"
-                    " - ~/.truba_slurm_gui/third_party/putty/plink.exe (auto-download)"
+                    "X11 başlatıcı bulunamadı. Windows'ta plink.exe (PuTTY) gerekli.\n"
+                    "Standalone modda program plink.exe'yi kullanıcı dizinine indirir:\n"
+                    " - ~/.truba_slurm_gui/third_party/putty/plink.exe"
                 )
                 return
 

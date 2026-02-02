@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 from truba_gui.core.i18n import t
+from truba_gui.core.ui_errors import show_exception
 from truba_gui.services.file_clipboard import get_file_clipboard
 from truba_gui.services.files_base import RemoteEntry
 
@@ -735,7 +736,7 @@ class RemoteDirPanel(QWidget):
                 files.rename(old.rstrip("/"), dst)
                 self.refresh()
             except Exception as e:
-                QMessageBox.critical(self, t("common.error"), str(e))
+                show_exception(self, title=t("common.error"), user_message=str(e), exc=e, area="FILES")
             return
 
         # Copy/Move into clipboard
@@ -1190,7 +1191,7 @@ class RemoteDirPanel(QWidget):
             if clip.op == "move":
                 clipboard.clear()
         except Exception as e:
-            QMessageBox.critical(self, t("common.error"), str(e))
+            show_exception(self, title=t("common.error"), user_message=str(e), exc=e, area="FILES")
 
 
     def _paste_system_clipboard_into(self, dest_dir: str) -> bool:
@@ -1480,5 +1481,5 @@ class RemoteDirPanel(QWidget):
                 src_panel.refresh()
             return True
         except Exception as e:
-            QMessageBox.critical(self, t("common.error"), str(e))
+            show_exception(self, title=t("common.error"), user_message=str(e), exc=e, area="FILES")
             return False

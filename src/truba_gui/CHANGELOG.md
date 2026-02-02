@@ -4,7 +4,7 @@
 - Fix: Prevent starting a second VcXsrv instance when display port is already listening (avoids 'another window manager is running').
 - X11: Login ekranındaki `SSH$` komut satırında X11 forwarding açıkken GUI komutları (`xclock`, `matlab`, `xterm` vb.) Paramiko ile değil sistem `ssh/plink` ile çalıştırılacak şekilde düzenlendi. Bu sayede pencere TrubaGUI içinde sekme açmadan Windows'ta ayrı X11 penceresi olarak açılır.
 - X11: Uzak komutlar `bash -lc 'unset LD_LIBRARY_PATH; ...'` içinde çalıştırılarak `libXrender/_XGetRequest` gibi env kaynaklı sembol çakışmalarının önüne geçildi.
-- Standalone altyapısı: Windows'ta X server yoksa `src/truba_gui/third_party/vcxsrv/XWin.exe` (portable VcXsrv) varsa otomatik başlatan `services/xserver_manager.py` eklendi.
+- Standalone altyapısı: Windows'ta X server yoksa `~/.truba_slurm_gui/third_party/vcxsrv/XWin.exe` (portable VcXsrv) varsa otomatik başlatan `services/xserver_manager.py` eklendi.
 - Standalone X11: VcXsrv için `XWin.exe` varsayımı kaldırıldı; `third_party/vcxsrv/vcxsrv.exe` ve `third_party/vcxsrv/runtime/vcxsrv.exe` dahil olmak üzere `vcxsrv.exe/XWin.exe` giriş noktaları otomatik bulunup doğru çalışma dizini ile başlatılıyor.
 - Logs: Kalıcı log dosyası (`~/.truba_slurm_gui/app.log`) yazımı eklendi ve UI'ya `Logs` sekmesi eklendi.
 - Logs: `Logs` sekmesine "Kopyala" butonu eklendi.

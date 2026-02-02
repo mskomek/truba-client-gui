@@ -20,17 +20,10 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from truba_gui.core.i18n import t
-
-
-PUTTY_PLINK_URL = "https://the.earth.li/~sgtatham/putty/latest/w64/plink.exe"
-
-
 from truba_gui.core.paths import third_party_dir
 
 
-def _project_root() -> Path:
-    # Kept for backward compatibility (no longer used for file paths).
-    return Path(__file__).resolve().parents[1]
+PUTTY_PLINK_URL = "https://the.earth.li/~sgtatham/putty/latest/w64/plink.exe"
 
 
 def _log(log: Optional[Callable[[str], None]], msg: str) -> None:

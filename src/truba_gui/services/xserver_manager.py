@@ -11,10 +11,10 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from truba_gui.core.i18n import t
+from truba_gui.core.paths import third_party_dir
 
 from truba_gui.services.vcxsrv_release_downloader import get_latest_vcxsrv_asset
 
-from truba_gui.core.paths import third_party_dir
 # Standalone goals:
 # - No PuTTY/MobaXterm required (we download plink/vcxsrv with explicit user consent elsewhere).
 # - For plink -X to work reliably on Windows, local X server must listen on TCP 127.0.0.1:6000 (DISPLAY :0).
@@ -85,12 +85,6 @@ def _is_port_open(host: str, port: int) -> bool:
 
 def _is_display_listening(display: int = 0) -> bool:
     return _is_port_open("127.0.0.1", 6000 + int(display))
-
-
-def _project_root() -> Path:
-    return Path(__file__).resolve().parents[1]  # .../truba_gui
-
-
 
 
 def _vcxsrv_dir() -> Path:

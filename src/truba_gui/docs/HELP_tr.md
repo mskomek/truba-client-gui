@@ -43,18 +43,14 @@ Bu programın mantığı çok basit:
 ### Standalone (EXE)
 
 - Bu yöntem için **Python gerekmez**.
-- Uygulama ihtiyaç duyarsa **3rd‑party araçları sizin onayınızla indirir**:
-  - `plink.exe` (PuTTY) → `~/.truba_slurm_gui/third_party/putty/`
-  - VcXsrv runtime (X11 için) → `~/.truba_slurm_gui/third_party/vcxsrv/`
+- Dış bağımlılıklar:
+  - `plink.exe` (PuTTY)
+  - X11/GUI uygulamalar için: **VcXsrv** (Windows X server)
 
 Adımlar:
 1. EXE paketini indir ve çalıştır.
-2. X11/GUI uygulaması kullanacaksan, uygulama VcXsrv/plink gerekli olduğunda indirme izni isteyecektir.
-3. Bağlan → dosya işlemleri → job gönder/izle.
-
-Not:
-- Kurumsal ağlarda indirme engelli olabilir; bu durumda `plink.exe` yolunu manuel gösterebilirsin veya kurumun onaylı PuTTY kurulumunu kullanabilirsin.
-
+2. X11 kullanacaksan VcXsrv’yi kur/çalıştır.
+3. `plink.exe` yolunu ayarla (uygulama ayarından veya paketle aynı klasöre koyarak).
 
 ### Kaynak koddan (From Source)
 

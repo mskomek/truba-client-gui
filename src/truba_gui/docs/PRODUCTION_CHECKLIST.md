@@ -19,7 +19,7 @@ Bu dosya, TrubaGUI'nin "ürün" gibi paketlenip sahada kullanılmasında en sık
 
 ## 3) PuTTY / plink
 
-- [ ] `src/truba_gui/third_party/putty/plink.exe` mevcut (ya da sistem PATH)
+- [ ] `~/.truba_slurm_gui/third_party/putty/plink.exe` mevcut (ya da sistem PATH)
 - [ ] X11 komutu plink ile çalıştırılıyorsa: `-X -t` ve `env TERM=xterm bash -lc '...'
 - [ ] Şifre/token hiçbir zaman history veya UI log içine düşmüyor
 

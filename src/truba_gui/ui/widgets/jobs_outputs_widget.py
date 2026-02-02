@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
 )
 
 from truba_gui.core.i18n import t
+from truba_gui.core.ui_errors import show_exception
 from truba_gui.core.history import append_event
 from truba_gui.ui.widgets.remote_dir_panel import RemoteDirPanel
 from truba_gui.services.slurm_script_parser import parse_output_error, resolve_path
@@ -143,7 +144,7 @@ class JobsOutputsWidget(QWidget):
         try:
             txt = self.session["slurm"].squeue(user)
         except Exception as e:
-            QMessageBox.warning(self, t("common.error"), str(e))
+            show_exception(self, title=t("common.error"), user_message=str(e), exc=e, area="JOBS")
             return
         self.jobs_text.setPlainText(txt)
         append_event({"type": "squeue", "user": user})
@@ -157,7 +158,7 @@ class JobsOutputsWidget(QWidget):
         try:
             res = self.session["slurm"].scancel(jobid)
         except Exception as e:
-            QMessageBox.warning(self, t("common.error"), str(e))
+            show_exception(self, title=t("common.error"), user_message=str(e), exc=e, area="JOBS")
             return
         self.jobs_text.append("\n" + res)
         append_event({"type": "scancel", "jobid": jobid})
@@ -201,7 +202,7 @@ class JobsOutputsWidget(QWidget):
         try:
             script_text = files.read_text(script_path)
         except Exception as e:
-            QMessageBox.warning(self, t("common.error"), f"Script açılamadı: {e}")
+            show_exception(self, title=t("common.error"), user_message=f"Script açılamadı: {e}", exc=e, area="JOBS")
             return
 
         self.active_script = script_path

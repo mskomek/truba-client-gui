@@ -3,6 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Optional, Tuple
 
+import socket
+
+from truba_gui.core.debug_support import timed
+
 import paramiko
 
 from truba_gui.core.logging import get_logger
@@ -94,21 +98,39 @@ class SSHClientWrapper:
             self.client = None
         self.log("SSH: closed")
 
-    def run(self, command: str) -> Tuple[int, str, str]:
+    def run(self, command: str, *, timeout_s: Optional[float] = None) -> Tuple[int, str, str]:
         if not self.client:
             raise RuntimeError("SSH client not connected")
+        t0 = timed()
         # Never echo secrets into the UI/logs.
         if is_sensitive_command(command):
             self.log("SSH$ <redacted>")
         else:
             self.log(f"SSH$ {command}")
         stdin, stdout, stderr = self.client.exec_command(command)
-        out = stdout.read().decode(errors="replace")
-        err = stderr.read().decode(errors="replace")
-        code = stdout.channel.recv_exit_status()
+        if timeout_s is not None:
+            try:
+                stdout.channel.settimeout(timeout_s)
+                stderr.channel.settimeout(timeout_s)
+            except Exception:
+                pass
+        try:
+            out = stdout.read().decode(errors="replace")
+            err = stderr.read().decode(errors="replace")
+            code = stdout.channel.recv_exit_status()
+            timed_out = False
+        except socket.timeout:
+            out = ""
+            err = ""
+            code = 124
+            timed_out = True
         if out.strip():
             self.log(out.rstrip())
         if err.strip():
             self.log("STDERR:\n" + err.rstrip())
-        self.log(f"[exit={code}]")
+        dt = timed() - t0
+        if timed_out:
+            self.log(f"[timeout after {dt:.1f}s exit={code}]")
+        else:
+            self.log(f"[exit={code} duration={dt:.2f}s]")
         return code, out, err

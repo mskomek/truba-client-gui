@@ -6,29 +6,31 @@ __pycache__/
 venv/
 .env
 
-# Build outputs
-dist/
-*.spec.bak
-*.manifest
+# Packaging outputs
+/dist/
+/build/**
+!/build/
+!/build/windows/
+!/build/windows/**
+
+# Qt / PySide
+*.qrc
+*.qm
+
+# Logs
 *.log
 
-# PyInstaller work dirs (if used)
-*.toc
-*.pkg
-*.pyz
+# Runtime state (app)
+.truba_slurm_gui/
 
-# IDE
-.vscode/
-.idea/
+# Third-party binaries (downloaded at runtime)
+src/truba_gui/third_party/
+third_party/
 
 # OS
 .DS_Store
 Thumbs.db
 
-# App runtime data (user home)
-.truba_slurm_gui/
-
-# Do not commit third-party binaries (they are downloaded at runtime)
-src/truba_gui/third_party/
-third_party/
-/build/
+# IDE
+.vscode/
+.idea/

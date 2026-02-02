@@ -51,19 +51,18 @@ The mental model is simple:
 
 ### Standalone (EXE)
 
-- **Python is not required**.
-- When needed, the app can **download 3rd‑party tools with your consent**:
-  - `plink.exe` (PuTTY) → `~/.truba_slurm_gui/third_party/putty/`
-  - VcXsrv runtime (for X11) → `~/.truba_slurm_gui/third_party/vcxsrv/`
+If you download the **standalone EXE**, you do **not** need Python or `requirements.txt`.
+
+External prerequisites (Windows):
+
+- **PuTTY / plink.exe** (X11 uses `plink.exe -X`, not Paramiko)
+- **VcXsrv** (only if you need X11 / GUI apps)
 
 Steps:
-1. Download and run the EXE package.
-2. If you use X11/GUI apps, the app will ask permission to download VcXsrv/plink when required.
-3. Connect → manage files → submit/monitor jobs.
 
-Note:
-- Some corporate networks block downloads; in that case, point the app to an existing `plink.exe` or use an approved PuTTY installation.
-
+1. Start **VcXsrv** (only if you will run GUI apps)
+2. Launch the EXE
+3. Create/select a connection profile and connect
 
 ### From source
 

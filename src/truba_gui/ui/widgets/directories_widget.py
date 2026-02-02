@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
 )
 
 from truba_gui.core.i18n import t
+from truba_gui.core.ui_errors import show_exception
 from truba_gui.core.history import append_event
 from truba_gui.ui.widgets.remote_dir_panel import RemoteDirPanel
 
@@ -79,7 +80,7 @@ class DirectoriesWidget(QWidget):
             try:
                 content = self.session["files"].read_text(path)
             except Exception as e:
-                QMessageBox.warning(self, t("common.error"), t("dirs.unreadable").format(err=e))
+                show_exception(self, title=t("common.error"), user_message=t("dirs.unreadable").format(err=e), exc=e, area="FILES")
                 return
             save_path, _ = QFileDialog.getSaveFileName(self, t("dirs.save_as") if t("dirs.save_as") != "[dirs.save_as]" else "Farklı Kaydet")
             if not save_path:
@@ -88,7 +89,7 @@ class DirectoriesWidget(QWidget):
                 with open(save_path, "w", encoding="utf-8") as f:
                     f.write(content)
             except Exception as e:
-                QMessageBox.warning(self, t("common.error"), f"Kaydedilemedi: {e}")
+                show_exception(self, title=t("common.error"), user_message=f"Kaydedilemedi: {e}", exc=e, area="FILES")
                 return
             append_event({"type": "download", "remote": path, "local": save_path})
             dlg.accept()
@@ -100,7 +101,7 @@ class DirectoriesWidget(QWidget):
             try:
                 content = self.session["files"].read_text(path)
             except Exception as e:
-                QMessageBox.warning(self, t("common.error"), f"Okunamadı: {e}")
+                show_exception(self, title=t("common.error"), user_message=f"Okunamadı: {e}", exc=e, area="FILES")
                 return
             append_event({"type": "open_editor", "path": path})
             self.open_in_editor.emit(path, content)

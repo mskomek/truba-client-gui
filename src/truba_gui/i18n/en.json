@@ -213,5 +213,6 @@
     "welcome_title": "Welcome",
     "dont_show_again": "Don't show again",
     "missing_help_text": "Help content could not be loaded."
-  }
+  },
+  "common.error_code": "Error Code"
 }

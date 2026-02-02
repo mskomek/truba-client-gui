@@ -5,6 +5,7 @@ from PySide6.QtWidgets import QApplication
 from truba_gui.core.i18n import load_saved_language, system_default_language
 from truba_gui.core.i18n import validate_language_files
 from truba_gui.core.logging_setup import setup_logging, install_excepthook
+from truba_gui.core.debug_support import log_startup_snapshot
 from truba_gui.ui.main_window import MainWindow
 from truba_gui.config.storage import get_ui_pref_bool, set_ui_pref_bool
 from truba_gui.ui.dialogs.welcome_dialog import WelcomeDialog
@@ -34,6 +35,10 @@ def main() -> int:
     # Logging (file-backed, rotating). Must not crash the GUI.
     setup_logging(level=logging.INFO)
     install_excepthook()
+    try:
+        log_startup_snapshot()
+    except Exception:
+        pass
 
     _bootstrap_safety_checks()
 

@@ -1,17 +1,23 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 
 def app_data_dir() -> Path:
-    """Return user-writable app data directory (~/.truba_slurm_gui)."""
-    d = Path.home() / ".truba_slurm_gui"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+    """Per-user app data directory used for logs/config/3rd-party downloads."""
+
+    # Keep the historic folder name for backwards compatibility.
+    base = Path.home() / ".truba_slurm_gui"
+    base.mkdir(parents=True, exist_ok=True)
+    return base
 
 
 def third_party_dir() -> Path:
-    """Return directory for downloaded third-party tools."""
     d = app_data_dir() / "third_party"
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def is_frozen_exe() -> bool:
+    return bool(getattr(os, "frozen", False) or getattr(__import__("sys"), "frozen", False))

@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
 )
 
 from truba_gui.core.i18n import t
+from truba_gui.core.ui_errors import show_exception
 from truba_gui.core.history import append_event
 
 
@@ -56,7 +57,7 @@ class EditorWidget(QWidget):
             self.open_file(path, content)
             append_event({"type": "editor_load", "path": path})
         except Exception as e:
-            QMessageBox.warning(self, t("common.error"), f"Dosya açılamadı: {e}")
+            show_exception(self, title=t("common.error"), user_message=f"Dosya açılamadı: {e}", exc=e, area="EDITOR")
 
     def save_path(self):
         if not self.session or not self.session.get("files"):
@@ -71,4 +72,4 @@ class EditorWidget(QWidget):
             append_event({"type": "editor_save", "path": path})
             QMessageBox.information(self, t("common.info"), "Kaydedildi.")
         except Exception as e:
-            QMessageBox.warning(self, t("common.error"), f"Kaydedilemedi: {e}")
+            show_exception(self, title=t("common.error"), user_message=f"Kaydedilemedi: {e}", exc=e, area="EDITOR")

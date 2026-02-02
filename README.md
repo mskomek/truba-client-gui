@@ -25,15 +25,16 @@
 Bu modda **Python kurmanız gerekmez**.
 
 1) GitHub Releases’tan en güncel paketi indirin (Windows).  
-2) (Opsiyonel: X11 kullanacaksanız) **VcXsrv** gerekli olabilir.  
-3) Uygulama ihtiyaç duyarsa **3rd‑party araçları sizin onayınızla indirir**:
-   - `plink.exe` (PuTTY) → `~/.truba_slurm_gui/third_party/putty/`
-   - VcXsrv runtime (X11 için) → `~/.truba_slurm_gui/third_party/vcxsrv/`
+2) (Opsiyonel: X11 kullanacaksanız) **VcXsrv** kurun.  
+3) **PuTTY/plink** temin edin:
+   - `plink.exe` dosyasını uygulamanın yanına koyun **veya**
+   - uygulama ayarlarından `plink.exe` yolunu gösterin (varsa).
 4) EXE’yi çalıştırın.
 
-**Notlar**
-- İsterseniz `plink.exe` yolunu manuel de gösterebilirsiniz (kurumsal kısıtlar varsa).
-- Bazı kurumlarda firewall/AV politikaları nedeniyle indirme veya çalıştırma izni gerekebilir.
+**Dış bağımlılıklar (EXE içinde gelmez):**
+- `plink.exe` (PuTTY)
+- `VcXsrv` (X11 gerekiyorsa)
+- Kurumunuzun firewall/AV politikaları (bazı ortamlarda izin gerekebilir)
 
 ---
 
