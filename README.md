@@ -54,3 +54,31 @@ python -m venv .venv
 
 pip install -r requirements.txt
 # or: pip install -e .
+
+Run
+
+python -m truba_gui
+
+Documentation
+
+From within the application: click the Help (❓) icon in the top-left corner.
+
+As files:
+
+Turkish: src/truba_gui/docs/HELP_tr.md
+
+English: src/truba_gui/docs/HELP_en.md
+
+Security Notes
+
+Passwords / tokens are never written to history and never shown in the UI.
+
+Secrets are never logged (commands may be logged, but credentials are not).
+
+X11 processes are cleaned up on application exit; orphan processes are handled defensively.
+
+License / Contributions
+
+Issues / PRs: via GitHub
+
+This project is client-side only; it does NOT modify the TRUBA infrastructure.
