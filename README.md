@@ -94,8 +94,7 @@ you may make a **voluntary donation**.
 bc1qvnrw2rn89rltx8ttj0hfyyte8lasgcsr7f3lxz
 ```
 
-![WhatsApp Image 2026-02-03 at 13 48 22](https://github.com/user-attachments/assets/acd89cb8-c9ac-4121-9bb3-1a11982ccd3e)
-
+<img width="263" height="261" alt="image" src="https://github.com/user-attachments/assets/a1cf3da4-ce28-42b8-afc7-010548bdb6ee" />
 
 
 Donations are **completely optional** and do **not** grant any special features, privileges, or support guarantees.
