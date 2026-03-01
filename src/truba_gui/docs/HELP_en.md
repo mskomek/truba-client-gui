@@ -47,6 +47,16 @@ The mental model is simple:
 
 ---
 
+## Help libraries in app
+
+Use the Help dialog's library selector for:
+
+- **Core Help**: app usage and common workflows
+- **TRUBA Playbook**: TRUBA-specific operational notes
+- **Generic Slurm/HPC**: portable guidance for other clusters
+
+---
+
 ## Install & run
 
 ### Standalone (EXE)

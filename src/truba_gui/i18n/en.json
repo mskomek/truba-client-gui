@@ -212,7 +212,11 @@
     "help_title": "Help",
     "welcome_title": "Welcome",
     "dont_show_again": "Don't show again",
-    "missing_help_text": "Help content could not be loaded."
+    "missing_help_text": "Help content could not be loaded.",
+    "library_label": "Library",
+    "library_core": "Core Help",
+    "library_truba": "TRUBA Playbook",
+    "library_generic": "Generic Slurm/HPC"
   },
   "common.error_code": "Error Code"
 }

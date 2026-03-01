@@ -212,7 +212,11 @@
     "help_title": "Yardım",
     "welcome_title": "Hoş Geldiniz",
     "dont_show_again": "Bir daha gösterme",
-    "missing_help_text": "Yardım içeriği yüklenemedi."
+    "missing_help_text": "Yardım içeriği yüklenemedi.",
+    "library_label": "Kütüphane",
+    "library_core": "Temel Yardım",
+    "library_truba": "TRUBA Rehberi",
+    "library_generic": "Genel Slurm/HPC"
   },
   "common.error_code": "Hata Kodu"
 }

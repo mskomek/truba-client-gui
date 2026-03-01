@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QDialog, QVBoxLayout, QTextBrowser, QHBoxLayout, QPushButton
+from PySide6.QtWidgets import QDialog, QVBoxLayout, QTextBrowser, QHBoxLayout, QPushButton, QComboBox, QLabel
 from PySide6.QtCore import Qt
 
 from truba_gui.core.i18n import t, current_language
@@ -16,15 +16,19 @@ class HelpDialog(QDialog):
 
         layout = QVBoxLayout(self)
 
+        top = QHBoxLayout()
+        self.lbl_lib = QLabel(t("help.library_label"))
+        self.cmb_lib = QComboBox(self)
+        self.cmb_lib.addItem(t("help.library_core"), "core")
+        self.cmb_lib.addItem(t("help.library_truba"), "truba")
+        self.cmb_lib.addItem(t("help.library_generic"), "generic")
+        self.cmb_lib.currentIndexChanged.connect(self._reload_doc)
+        top.addWidget(self.lbl_lib)
+        top.addWidget(self.cmb_lib, 1)
+        layout.addLayout(top)
+
         self.browser = QTextBrowser(self)
         self.browser.setOpenExternalLinks(True)
-
-        lang = current_language()
-        md = read_doc_text(f"HELP_{lang}.md")
-        if md:
-            self.browser.setMarkdown(md)
-        else:
-            self.browser.setPlainText(t("help.missing_help_text"))
 
         layout.addWidget(self.browser, 1)
 
@@ -34,3 +38,19 @@ class HelpDialog(QDialog):
         btn.clicked.connect(self.accept)
         bottom.addWidget(btn, 0, Qt.AlignRight)
         layout.addLayout(bottom)
+
+        self._reload_doc()
+
+    def _reload_doc(self):
+        lang = current_language()
+        kind = self.cmb_lib.currentData()
+        if kind == "truba":
+            md = read_doc_text(f"HELP_LIBRARY_TRUBA_{lang}.md")
+        elif kind == "generic":
+            md = read_doc_text(f"HELP_LIBRARY_GENERIC_{lang}.md")
+        else:
+            md = read_doc_text(f"HELP_{lang}.md")
+        if md:
+            self.browser.setMarkdown(md)
+        else:
+            self.browser.setPlainText(t("help.missing_help_text"))

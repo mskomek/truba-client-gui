@@ -52,6 +52,16 @@ Adımlar:
 2. X11 kullanacaksan VcXsrv’yi kur/çalıştır.
 3. `plink.exe` yolunu ayarla (uygulama ayarından veya paketle aynı klasöre koyarak).
 
+---
+
+## Uygulama içi yardım kütüphaneleri
+
+Yardım penceresindeki kütüphane seçicisinden:
+
+- **Temel Yardım**: uygulama kullanımı ve genel akış
+- **TRUBA Rehberi**: TRUBA’ya özel operasyon notları
+- **Genel Slurm/HPC**: diğer kümeler için taşınabilir öneriler
+
 ### Kaynak koddan (From Source)
 
 Geliştiriciler veya özelleştirme yapmak isteyenler için:
