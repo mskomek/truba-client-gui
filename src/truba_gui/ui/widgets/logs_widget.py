@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QTextCursor, QGuiApplication
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit, QLabel
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit, QLabel, QFileDialog, QMessageBox
 
 from truba_gui.core.i18n import t
 from truba_gui.core.logging import log_path
+from truba_gui.core.diagnostics import create_diagnostic_bundle
 
 class LogsWidget(QWidget):
     def __init__(self):
@@ -22,10 +23,18 @@ class LogsWidget(QWidget):
         self.btn_copy = QPushButton(t("logs.copy") if t("logs.copy") != "[logs.copy]" else "Kopyala")
         self.btn_copy.clicked.connect(self.copy_all)
 
+        self.btn_copy_path = QPushButton("Copy Log Path")
+        self.btn_copy_path.clicked.connect(self.copy_log_path)
+
+        self.btn_diag = QPushButton("Export Diagnostics")
+        self.btn_diag.clicked.connect(self.export_diagnostics)
+
         top = QHBoxLayout()
         top.addWidget(self.lbl)
         top.addStretch(1)
         top.addWidget(self.btn_copy)
+        top.addWidget(self.btn_copy_path)
+        top.addWidget(self.btn_diag)
         top.addWidget(self.btn_refresh)
 
         lay = QVBoxLayout(self)
@@ -58,3 +67,16 @@ class LogsWidget(QWidget):
 
     def copy_all(self) -> None:
         QGuiApplication.clipboard().setText(self.txt.toPlainText())
+
+    def copy_log_path(self) -> None:
+        QGuiApplication.clipboard().setText(str(log_path()))
+
+    def export_diagnostics(self) -> None:
+        target_dir = QFileDialog.getExistingDirectory(self, "Select output folder")
+        if not target_dir:
+            return
+        try:
+            p = create_diagnostic_bundle(target_dir)
+            QMessageBox.information(self, "Diagnostics", f"Bundle created:\n{p}")
+        except Exception as e:
+            QMessageBox.critical(self, "Diagnostics", f"Failed: {e}")

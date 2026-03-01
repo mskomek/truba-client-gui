@@ -109,6 +109,7 @@ def build_x11_launch(
     trusted: bool = True,
     key_path: Optional[str] = None,
     password: Optional[str] = None,
+    host_key_policy: str = "accept-new",
 ) -> Optional[X11Launch]:
     """Build a system command to launch remote X11 app."""
 
@@ -128,7 +129,8 @@ def build_x11_launch(
         flag = "-Y" if trusted else "-X"
         args: List[str] = [flag, "-C", "-p", str(port)]
         # Make failures explicit and non-interactive by default
-        args += ["-o", "ExitOnForwardFailure=yes", "-o", "ForwardX11=yes", "-o", "StrictHostKeyChecking=accept-new"]
+        strict_mode = "yes" if (host_key_policy or "").strip().lower() == "strict" else "accept-new"
+        args += ["-o", "ExitOnForwardFailure=yes", "-o", "ForwardX11=yes", "-o", f"StrictHostKeyChecking={strict_mode}"]
         if password:
             # Don't attempt password auth here; it will prompt in a hidden console.
             args += ["-o", "BatchMode=yes"]

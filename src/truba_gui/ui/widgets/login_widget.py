@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Signal, QProcess
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QFormLayout, QHBoxLayout,
     QLineEdit, QPushButton, QCheckBox, QLabel, QFileDialog,
@@ -15,15 +15,7 @@ from truba_gui.core.history import append_event
 from truba_gui.core.logging import append_log
 from truba_gui.services.slurm_mock import MockSlurmBackend
 from truba_gui.services.files_mock import MockFilesBackend
-from truba_gui.services.x11_system_ssh import (
-    build_x11_launch,
-    is_likely_x11_gui_command,
-    is_likely_x11_related_command,
-    wrap_remote_cmd_clean_env,
-)
-from truba_gui.services.xserver_manager import ensure_x_server_running
-from truba_gui.services.xserver_manager import stop_x_server_started_by_app
-from truba_gui.services.putty_manager import ensure_plink_available
+from truba_gui.services.x11_runner import X11Runner
 from truba_gui.ssh.client import SSHClientWrapper, SSHConnInfo
 from truba_gui.services.files_ssh import SSHFilesBackend
 from truba_gui.services.slurm_ssh import SSHSlurmBackend
@@ -42,9 +34,7 @@ class LoginWidget(QWidget):
 
     def __init__(self):
         super().__init__()
-        # Keep background QProcess instances (X11 ssh/plink) alive to ensure
-        # stdout/stderr signals are delivered (avoid GC surprises).
-        self._bg_procs: list[QProcess] = []
+        self._x11_runner = X11Runner(log_cb=self.append_console, parent=self)
 
         # ---- Left: profiles
         self.profiles_list = QListWidget()
@@ -65,6 +55,7 @@ class LoginWidget(QWidget):
         self.btn_browse_key.clicked.connect(self.pick_key)
 
         self.cb_x11 = QCheckBox(t("login.x11_enable") if t("login.x11_enable") != "[login.x11_enable]" else "X11 Forwarding")
+        self.cb_strict_hostkey = QCheckBox("Strict host key checking")
 
         # X11 preflight / lifecycle settings (app-wide)
         self.cb_x11_autodeps = QCheckBox(t("login.x11_autodeps_label"))
@@ -126,6 +117,7 @@ class LoginWidget(QWidget):
         right_lay = QVBoxLayout(right)
         right_lay.addLayout(form)
         right_lay.addWidget(self.cb_x11)
+        right_lay.addWidget(self.cb_strict_hostkey)
         right_lay.addWidget(self.cb_x11_autodeps)
         right_lay.addWidget(self.cb_close_vcxsrv_on_exit)
         right_lay.addWidget(self.cb_close_x11_procs_on_exit)
@@ -174,29 +166,10 @@ class LoginWidget(QWidget):
         except Exception:
             st = {}
 
-        if st.get("close_x11_procs_on_exit", True):
-            for p in list(self._bg_procs):
-                try:
-                    if p.state() != QProcess.ProcessState.NotRunning:
-                        p.terminate()
-                        p.waitForFinished(1000)
-                except Exception:
-                    pass
-                try:
-                    from truba_gui.services.process_registry import unregister
-
-                    pid = int(p.processId() or 0)
-                    if pid:
-                        unregister(pid)
-                except Exception:
-                    pass
-            self._bg_procs.clear()
-
-        if st.get("close_vcxsrv_on_exit", True):
-            try:
-                stop_x_server_started_by_app(log=self.append_console)
-            except Exception:
-                pass
+        self._x11_runner.shutdown(
+            close_x11_procs=bool(st.get("close_x11_procs_on_exit", True)),
+            close_vcxsrv=bool(st.get("close_vcxsrv_on_exit", True)),
+        )
 
         # Wipe connection secrets from in-memory session (best-effort).
         try:
@@ -250,6 +223,7 @@ class LoginWidget(QWidget):
         self.username.setText(prof.get("username", ""))
         self.key_path.setText(prof.get("key_path", ""))
         self.cb_x11.setChecked(bool(prof.get("x11_forwarding", False)))
+        self.cb_strict_hostkey.setChecked((prof.get("host_key_policy") or "accept-new") == "strict")
         # legacy field: prof.get("dry_run") ignored
 
         save_pw = bool(prof.get("save_password", False))
@@ -310,6 +284,7 @@ class LoginWidget(QWidget):
             "port": port,
             "username": self.username.text().strip(),
             "key_path": self.key_path.text().strip(),
+            "host_key_policy": "strict" if self.cb_strict_hostkey.isChecked() else "accept-new",
             "x11_forwarding": self.cb_x11.isChecked(),
             # dry_run removed
             "save_password": self.cb_save_password.isChecked(),
@@ -376,6 +351,7 @@ class LoginWidget(QWidget):
             username=self.username.text().strip(),
             password=password,
             key_path=self.key_path.text().strip(),
+            host_key_policy=("strict" if self.cb_strict_hostkey.isChecked() else "accept-new"),
             x11_forwarding=self.cb_x11.isChecked(),
             dry_run=False,
         )
@@ -388,15 +364,8 @@ class LoginWidget(QWidget):
         # auto dependency management, ensure plink and VcXsrv are available
         # BEFORE connecting.
         if cfg.x11_forwarding and (not cfg.dry_run) and self.cb_x11_autodeps.isChecked():
-            # plink.exe is required for password-based X11 (and is the most
-            # reliable standalone path for Windows).
-            if not ensure_plink_available(log=self.append_console, parent=self):
+            if not self._x11_runner.preflight(enabled=True, parent=self, allow_download=True):
                 QMessageBox.warning(self, t("login.x11_title"), t("login.err_x11_plink_needed"))
-                return
-
-            # Ensure local X server (VcXsrv) is running and TCP 6000 is open.
-            if not ensure_x_server_running(self.append_console, parent=self, allow_download=True):
-                QMessageBox.warning(self, t("login.x11_title"), t("login.err_x11_vcxsrv_failed"))
                 return
 
         self.append_console(f"Bağlanılıyor: {cfg.username}@{cfg.host}:{cfg.port}")
@@ -414,6 +383,7 @@ class LoginWidget(QWidget):
                     username=cfg.username,
                     password=cfg.password,
                     key_path=cfg.key_path,
+                    host_key_policy=cfg.host_key_policy,
                     x11_forwarding=cfg.x11_forwarding,
                 )
                 ssh = SSHClientWrapper(conn, log_cb=self.append_console)
@@ -449,85 +419,11 @@ class LoginWidget(QWidget):
             return
         ssh = self._session.get("ssh")
         if not ssh:
-            self.append_console("SSH bağlı değil (Mock modda komut çalıştırılmaz).")
+            self.append_console("SSH bagli degil (Mock modda komut calistirilmaz).")
             return
 
         info = getattr(ssh, "info", None)
-        x11_enabled = bool(getattr(info, "x11_forwarding", False))
-
-        # X11 is special: use system ssh/plink so the GUI window is separate (like MobaXterm).
-        if x11_enabled and (is_likely_x11_gui_command(cmd) or is_likely_x11_related_command(cmd)):
-            # Ensure a local X server exists (VcXsrv). If one is already listening on :0, we reuse it.
-            if not ensure_x_server_running(self.append_console, parent=self, allow_download=True):
-                self.append_console("X11: Yerel X server (VcXsrv) başlatılamadı.")
-                return
-
-            remote_cmd = wrap_remote_cmd_clean_env(cmd)
-            launch = build_x11_launch(
-                host=info.host,
-                port=info.port,
-                user=info.username,
-                remote_cmd=remote_cmd,
-                trusted=True,
-                key_path=(info.key_path or None),
-                password=(info.password or None),
-            )
-            if not launch:
-                self.append_console(
-                    "X11 başlatıcı bulunamadı. Windows'ta plink.exe (PuTTY) gerekli.\n"
-                    "Standalone modda program plink.exe'yi kullanıcı dizinine indirir:\n"
-                    " - ~/.truba_slurm_gui/third_party/putty/plink.exe"
-                )
-                return
-
-            proc = QProcess(self)
-            # Make sure local DISPLAY is set for Windows OpenSSH + VcXsrv (PuTTY sets this implicitly).
-            try:
-                from PySide6.QtCore import QProcessEnvironment
-
-                env = QProcessEnvironment.systemEnvironment()
-                if (not env.contains("DISPLAY")) or (not env.value("DISPLAY")):
-                    env.insert("DISPLAY", "localhost:0.0")
-                proc.setProcessEnvironment(env)
-            except Exception:
-                pass
-            proc.setProgram(launch.program)
-            proc.setArguments(launch.args)
-            proc.readyReadStandardError.connect(lambda: self._append_process_io(proc, err=True))
-            proc.readyReadStandardOutput.connect(lambda: self._append_process_io(proc, err=False))
-            def _on_finished(code, _status):
-                self.append_console(t("login.x11_finished").format(code=code))
-                try:
-                    self._bg_procs.remove(proc)
-                except Exception:
-                    pass
-                try:
-                    from truba_gui.services.process_registry import unregister
-
-                    pid = int(proc.processId() or 0)
-                    if pid:
-                        unregister(pid)
-                except Exception:
-                    pass
-            proc.finished.connect(_on_finished)
-
-            # Register PID for orphan guard (best-effort; log-only)
-            def _on_started():
-                try:
-                    from truba_gui.services.process_registry import register
-
-                    pid = int(proc.processId() or 0)
-                    if pid:
-                        register(pid, kind=f"x11_{launch.backend}", cmd=cmd_show)
-                except Exception:
-                    pass
-            proc.started.connect(_on_started)
-
-            cmd_show = " ".join([launch.program] + launch.args)
-            self.append_console(t("login.x11_started").format(cmd=cmd_show))
-            self._bg_procs.append(proc)
-            proc.start()
-
+        if self._x11_runner.run_if_x11(info, cmd, parent=self):
             append_event({"type": "x11_cmd", "cmd": cmd})
             return
 
@@ -538,18 +434,11 @@ class LoginWidget(QWidget):
         except Exception as e:
             self.append_console(t("login.cmd_error").format(err=e))
 
-    def _append_process_io(self, proc: QProcess, *, err: bool) -> None:
-        data = bytes(proc.readAllStandardError() if err else proc.readAllStandardOutput()).decode(errors="replace")
-        if data.strip():
-            if err:
-                self.append_console(t("login.stderr").format(data=data.rstrip()))
-            else:
-                self.append_console(data.rstrip())
-
     def retranslate_ui(self):
         """Update user-facing texts when language changes."""
         try:
             self.cb_x11.setText(t("login.x11_enable"))
+            self.cb_strict_hostkey.setText("Strict host key checking")
             # dry-run removed
             self.cb_save_password.setText(t("login.save_password"))
             self.btn_browse_key.setText(t("login.browse"))

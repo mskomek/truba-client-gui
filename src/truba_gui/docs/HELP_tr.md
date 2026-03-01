@@ -103,6 +103,20 @@ Kurum banner/alias/modül çıktıları farklıysa bazı parse senaryolarında l
 
 ---
 
+## Destek matrisi
+
+| Senaryo | Durum | Not |
+|---|---|---|
+| Paramiko + key auth | Desteklenir | Ana SSH/oturum yolu |
+| Paramiko + parola auth | Desteklenir | Profilde şifreli saklama var |
+| X11 + plink + VcXsrv | Önerilen | Windows'ta en stabil yol |
+| X11 + OpenSSH + key | Desteklenir | Sistem/paket ssh ile `-Y/-X` |
+| X11 + OpenSSH + parola | Kısıtlı | Gizli TTY prompt bloklayabilir, plink önerilir |
+| Host key policy = `accept-new` | Desteklenir | Varsayılan profil seçeneği |
+| Host key policy = `strict` | Desteklenir | Bilinmeyen host key reddedilir |
+
+---
+
 ## Destek
 
 - Sorun bildirirken `~/.truba_slurm_gui/app.log` dosyasını eklemek çok faydalıdır.

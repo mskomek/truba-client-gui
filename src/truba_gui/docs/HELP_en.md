@@ -112,6 +112,20 @@ If your site prints banners/warnings that affect command output, parsing may deg
 
 ---
 
+## Support matrix
+
+| Scenario | Status | Notes |
+|---|---|---|
+| Paramiko + key auth | Supported | Main SSH/session path |
+| Paramiko + password auth | Supported | Password can be encrypted in profile |
+| X11 + plink + VcXsrv | Recommended | Most reliable on Windows |
+| X11 + OpenSSH + key | Supported | Uses system/bundled ssh with `-Y/-X` |
+| X11 + OpenSSH + password | Limited | Hidden TTY prompts can block; plink preferred |
+| Host key policy = `accept-new` | Supported | Default profile option |
+| Host key policy = `strict` | Supported | Unknown host keys are rejected |
+
+---
+
 ## Support
 
 - Please attach the log file when opening an issue:

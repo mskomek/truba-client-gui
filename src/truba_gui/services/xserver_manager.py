@@ -114,6 +114,14 @@ def _find_xserver_exe(vc_dir: Path) -> Optional[Path]:
     return None
 
 
+def vcxsrv_executable_path() -> Optional[Path]:
+    """Return detected local VcXsrv executable path, if available."""
+    try:
+        return _find_xserver_exe(_vcxsrv_dir())
+    except Exception:
+        return None
+
+
 @contextmanager
 def _file_lock(path: Path, timeout_s: float = 6.0):
     path.parent.mkdir(parents=True, exist_ok=True)

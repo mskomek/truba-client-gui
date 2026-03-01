@@ -57,6 +57,26 @@ class JobsOutputsWidget(QWidget):
         vj.addLayout(row)
         vj.addWidget(self.jobs_text)
 
+        # --- Accounting / details box
+        meta_box = QGroupBox("Accounting & Details")
+        self.meta_text = QTextEdit()
+        self.meta_text.setReadOnly(True)
+        self.meta_text.setPlaceholderText("sacct / scontrol results")
+        self.meta_job_id = QLineEdit()
+        self.meta_job_id.setPlaceholderText("Job ID")
+        self.btn_sacct = QPushButton("Refresh sacct")
+        self.btn_scontrol = QPushButton("Show job details")
+        self.btn_sacct.clicked.connect(self.refresh_sacct)
+        self.btn_scontrol.clicked.connect(self.show_job_details)
+        meta_row = QHBoxLayout()
+        meta_row.addWidget(self.btn_sacct)
+        meta_row.addStretch(1)
+        meta_row.addWidget(self.meta_job_id)
+        meta_row.addWidget(self.btn_scontrol)
+        vm = QVBoxLayout(meta_box)
+        vm.addLayout(meta_row)
+        vm.addWidget(self.meta_text)
+
         # --- Scratch panel
         self.scratch_panel = RemoteDirPanel(
             title=t("jobs_outputs.scratch_title") if t("jobs_outputs.scratch_title") != "[jobs_outputs.scratch_title]" else "Scratch"
@@ -103,6 +123,7 @@ class JobsOutputsWidget(QWidget):
         # --- main layout
         main = QVBoxLayout(self)
         main.addWidget(jobs_box)
+        main.addWidget(meta_box)
         main.addWidget(self.scratch_panel, 2)
         main.addWidget(out_group, 3)
 
@@ -113,6 +134,8 @@ class JobsOutputsWidget(QWidget):
         self.txt_err.setPlainText("")
         self.path_out.setText("")
         self.path_err.setText("")
+        self.meta_text.setPlainText("")
+        self.meta_job_id.setText("")
         self.active_script = ""
         self.active_out = ""
         self.active_err = ""
@@ -127,6 +150,7 @@ class JobsOutputsWidget(QWidget):
         self.scratch_panel.set_session(session)
         self.scratch_panel.set_dir(f"/arf/scratch/{user}" if user else "/arf/scratch")
         self.refresh_jobs()
+        self.refresh_sacct()
 
     def shutdown(self) -> None:
         """Stop timers / live watchers (best-effort)."""
@@ -162,6 +186,33 @@ class JobsOutputsWidget(QWidget):
             return
         self.jobs_text.append("\n" + res)
         append_event({"type": "scancel", "jobid": jobid})
+
+    def refresh_sacct(self):
+        if not self.session or not self.session.get("slurm"):
+            return
+        user = self.session["cfg"].username
+        try:
+            txt = self.session["slurm"].sacct(user)
+        except Exception as e:
+            show_exception(self, title=t("common.error"), user_message=str(e), exc=e, area="JOBS")
+            return
+        self.meta_text.setPlainText(txt)
+        append_event({"type": "sacct", "user": user})
+
+    def show_job_details(self):
+        if not self.session or not self.session.get("slurm"):
+            return
+        jobid = (self.meta_job_id.text() or "").strip() or (self.cancel_id.text() or "").strip()
+        if not jobid:
+            QMessageBox.information(self, t("common.info"), "Job ID required.")
+            return
+        try:
+            txt = self.session["slurm"].scontrol_show_job(jobid)
+        except Exception as e:
+            show_exception(self, title=t("common.error"), user_message=str(e), exc=e, area="JOBS")
+            return
+        self.meta_text.setPlainText(txt)
+        append_event({"type": "scontrol_show_job", "jobid": jobid})
 
     # ---------------- File open behaviors
     def load_one_file(self, remote_path: str):

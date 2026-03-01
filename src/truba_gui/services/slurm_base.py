@@ -9,3 +9,9 @@ class SlurmBackend(ABC):
 
     @abstractmethod
     def scancel(self, job_id: str) -> str: ...
+
+    @abstractmethod
+    def sacct(self, user: str) -> str: ...
+
+    @abstractmethod
+    def scontrol_show_job(self, job_id: str) -> str: ...

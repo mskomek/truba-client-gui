@@ -13,3 +13,16 @@ class MockSlurmBackend(SlurmBackend):
 
     def scancel(self, job_id: str) -> str:
         return f"Cancelled job {job_id} (mock)"
+
+    def sacct(self, user: str) -> str:
+        return (
+            "JobID           JobName    State    Elapsed   MaxRSS\n"
+            "12345           testjob    COMPLETED 00:10:12 1024M\n"
+            "12346           coolrun    PENDING   00:00:00 0K\n"
+        )
+
+    def scontrol_show_job(self, job_id: str) -> str:
+        return (
+            f"JobId={job_id} JobName=mock_job UserId=mock(1000) "
+            "JobState=RUNNING Partition=short Nodes=1"
+        )

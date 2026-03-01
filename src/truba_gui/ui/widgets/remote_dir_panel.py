@@ -881,58 +881,19 @@ class RemoteDirPanel(QWidget):
         self.queue_list.clear()
         self.queue_group.setVisible(False)
 
-    def _persist_batch_state(self, remaining: List[_PlannedOp], *, title: str) -> None:
-        """Persist remaining batch ops for crash-safe diagnostics.
-
-        This does **not** auto-resume (no new behavior for the user). It only
-        stores a small JSON snapshot under ~/.truba_slurm_gui.
-        """
+    def _journal_transfer(self, event: str, **fields) -> None:
+        """Append transfer operation events for diagnostics/audit."""
         try:
             from pathlib import Path
             import json
-            import time
+            from datetime import datetime
 
-            d = Path.home() / ".truba_slurm_gui"
-            d.mkdir(parents=True, exist_ok=True)
-            path = d / "last_batch.json"
-            payload = {
-                "ts": int(time.time()),
-                "title": title,
-                "panel_title": self.title,
-                "cwd": self.current_dir,
-                "remaining": [
-                    {"op": op.op, "src": op.src, "dst": op.dst, "recursive": bool(op.recursive)}
-                    for op in remaining
-                ],
-            }
-            path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        except Exception:
-            pass
-
-    def shutdown(self) -> None:
-        """Cancel in-flight batch operations (best-effort, non-blocking)."""
-        try:
-            if self._active_worker is not None:
-                try:
-                    self._active_worker.cancel()
-                except Exception:
-                    pass
-
-                # Save remaining plan snapshot (diagnostics only)
-                try:
-                    if self._active_plan:
-                        remaining = self._active_plan[max(0, self._active_step - 1):]
-                        if remaining:
-                            self._persist_batch_state(remaining, title=self._active_title or "batch")
-                except Exception:
-                    pass
-
-            if self._active_thread is not None:
-                try:
-                    self._active_thread.quit()
-                    self._active_thread.wait(500)
-                except Exception:
-                    pass
+            p = Path.home() / ".truba_slurm_gui" / "transfer_journal.jsonl"
+            p.parent.mkdir(parents=True, exist_ok=True)
+            payload = {"ts": datetime.now().isoformat(timespec="seconds"), "event": event}
+            payload.update(fields or {})
+            with p.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(payload, ensure_ascii=False) + "\n")
         except Exception:
             pass
 
@@ -972,6 +933,7 @@ class RemoteDirPanel(QWidget):
             dlg.setLabelText(label)
             dlg.setValue(step)
             self._queue_progress(step, label)
+            self._journal_transfer("step", title=title, step=int(step), label=label)
             QApplication.processEvents()
 
         def on_finished(cancelled: bool, msg: str) -> None:
@@ -988,6 +950,11 @@ class RemoteDirPanel(QWidget):
                     remaining = self._active_plan[max(0, self._active_step - 1):]
                     if remaining:
                         self._persist_batch_state(remaining, title=self._active_title)
+                        self._journal_transfer("cancelled", title=title, remaining=len(remaining))
+                elif state["error"]:
+                    self._journal_transfer("error", title=title, error=state["error"])
+                else:
+                    self._journal_transfer("completed", title=title, total=len(plan))
             except Exception:
                 pass
 

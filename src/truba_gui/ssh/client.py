@@ -20,6 +20,7 @@ class SSHConnInfo:
     username: str
     password: str = ""
     key_path: str = ""
+    host_key_policy: str = "accept-new"  # accept-new | strict
     x11_forwarding: bool = False  # UI flag; actual X11 is handled separately
 
 
@@ -57,7 +58,17 @@ class SSHClientWrapper:
             raise ValueError('SSH connection info not provided')
         self.log(f"SSH: connecting to {info.username}@{info.host}:{info.port} ...")
         self.client = paramiko.SSHClient()
-        self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        policy = (getattr(info, "host_key_policy", "accept-new") or "accept-new").strip().lower()
+        if policy == "strict":
+            try:
+                self.client.load_system_host_keys()
+            except Exception:
+                pass
+            self.client.set_missing_host_key_policy(paramiko.RejectPolicy())
+            self.log("SSH: host key policy = strict")
+        else:
+            self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            self.log("SSH: host key policy = accept-new")
 
         if info.key_path:
             self.log(f"SSH: using key {info.key_path}")
