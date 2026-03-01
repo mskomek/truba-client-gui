@@ -6,41 +6,20 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 
-$spec = "build/windows/truba-client-gui.spec"
-Write-Host "Building with PyInstaller spec: $spec"
-pyinstaller -y --clean $spec
-if ($LASTEXITCODE -ne 0) {
-    Write-Warning "Clean build failed, retrying without --clean"
-    pyinstaller -y $spec
-    if ($LASTEXITCODE -ne 0) {
-        throw "PyInstaller build failed."
-    }
-}
-
 $distDir = Join-Path $Root "dist/truba-client-gui"
 if (-not (Test-Path $distDir)) {
     throw "Expected ONEDIR output not found: $distDir"
 }
 
-# Put a simple changelog directly next to the EXE for end-users.
 $changelogSrc = Join-Path $Root "src/truba_gui/docs/CHANGELOG.md"
 $changelogOut = Join-Path $distDir "CHANGELOG.txt"
 if (Test-Path $changelogSrc) {
     (Get-Content $changelogSrc -Raw) | Set-Content -Path $changelogOut -Encoding utf8
-} else {
-    @"
-Changelog
-=========
-
-v$Version
-- Build generated.
-"@ | Set-Content -Path $changelogOut -Encoding utf8
 }
 
 $zipName = "truba-client-gui_v$Version`_windows_onedir.zip"
 $zipPath = Join-Path $Root "dist/$zipName"
 if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
-
 Compress-Archive -Path "$distDir/*" -DestinationPath $zipPath -Force
 
 $shaPath = "$zipPath.sha256"
