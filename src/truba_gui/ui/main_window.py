@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import QMainWindow, QTabWidget
 from PySide6.QtWidgets import QMenu, QToolButton, QWidget, QSizePolicy, QHBoxLayout
-from PySide6.QtGui import QAction, QIcon, QPixmap, QPainter, QColor, QPolygonF
-from PySide6.QtCore import Qt, QSize, QPointF
+from PySide6.QtGui import QAction, QIcon, QPixmap, QPainter, QColor
+from PySide6.QtCore import Qt, QSize
 from PySide6.QtSvg import QSvgRenderer
 
 from truba_gui.core.i18n import t, set_language
@@ -11,6 +11,7 @@ from .widgets.directories_widget import DirectoriesWidget
 from .widgets.editor_widget import EditorWidget
 from .widgets.logs_widget import LogsWidget
 from .dialogs.help_dialog import HelpDialog
+from .dialogs.quick_tour import QuickTourOverlay
 
 
 class MainWindow(QMainWindow):
@@ -79,6 +80,7 @@ class MainWindow(QMainWindow):
 
         self.jobs_outputs.request_show_directories.connect(self.show_directories)
         self.directories.open_in_editor.connect(self.open_in_editor)
+        self.editor.script_submitted.connect(self.on_script_submitted)
 
     def graceful_shutdown(self) -> None:
         """Graceful, idempotent shutdown sequence.
@@ -128,43 +130,17 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-    
-    def _asset_svg_icon(self, rel_path: str, w: int = 18, h: int = 18) -> QIcon:
-        """Render an SVG asset into a QIcon (stable across platforms)."""
-        try:
-            from pathlib import Path
-            base = Path(__file__).resolve().parent.parent  # ui -> truba_gui
-            svg_path = base / rel_path
-            if svg_path.exists():
-                renderer = QSvgRenderer(str(svg_path))
-                pm = QPixmap(w, h)
-                pm.fill(Qt.transparent)
-                painter = QPainter(pm)
-                renderer.render(painter)
-                painter.end()
-                return QIcon(pm)
-        except Exception:
-            pass
-        return QIcon()
-
-
     def _init_language_menu(self):
-        """Top-right language selector (shows selected language with flag)."""
+        """Top-right language selector + visible Help actions."""
         menubar = self.menuBar()
 
-        # Top-left Help button (always available)
-        self._help_btn = QToolButton(self)
-        self._help_btn.setAutoRaise(True)
-        self._help_btn.setIcon(self._asset_svg_icon("assets/icons/help.svg", 18, 18))
-        self._help_btn.setToolTip(t("help.help_title"))
-        self._help_btn.clicked.connect(self._open_help)
-
-        help_container = QWidget(self)
-        help_container.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
-        h = QHBoxLayout(help_container)
-        h.setContentsMargins(6, 0, 0, 0)
-        h.addWidget(self._help_btn)
-        menubar.setCornerWidget(help_container, Qt.TopLeftCorner)
+        self._help_menu = menubar.addMenu(t("help.help_title"))
+        self._act_help_center = QAction(t("help.open_help"), self)
+        self._act_help_tour = QAction(t("help.start_tour"), self)
+        self._act_help_center.triggered.connect(self._open_help)
+        self._act_help_tour.triggered.connect(self.start_quick_tour)
+        self._help_menu.addAction(self._act_help_center)
+        self._help_menu.addAction(self._act_help_tour)
 
         self._lang_menu = QMenu(self)
 
@@ -195,19 +171,55 @@ class MainWindow(QMainWindow):
             "QToolButton::menu-indicator { subcontrol-position: right center; }"
         )
 
+        self._help_btn = QToolButton(self)
+        self._help_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self._help_btn.setIcon(self._asset_svg_icon("assets/icons/help.svg", 18, 18))
+        self._help_btn.setAutoRaise(False)
+        self._help_btn.clicked.connect(self._open_help)
+
+        self._tour_btn = QToolButton(self)
+        self._tour_btn.setAutoRaise(False)
+        self._tour_btn.clicked.connect(self.start_quick_tour)
+
         # Put the button into a container so it doesn't get clipped by the cornerWidget geometry.
         lang_container = QWidget(self)
         lang_container.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
         layout = QHBoxLayout(lang_container)
         layout.setContentsMargins(0, 0, 6, 0)
+        layout.addWidget(self._help_btn)
+        layout.addWidget(self._tour_btn)
         layout.addWidget(self._lang_btn)
         menubar.setCornerWidget(lang_container, Qt.TopRightCorner)
 
+    def _asset_svg_icon(self, rel_path: str, w: int = 18, h: int = 18) -> QIcon:
+        """Render an SVG asset into a QIcon (stable across platforms)."""
+        try:
+            from pathlib import Path
+            base = Path(__file__).resolve().parent.parent  # ui -> truba_gui
+            svg_path = base / rel_path
+            if svg_path.exists():
+                renderer = QSvgRenderer(str(svg_path))
+                pm = QPixmap(w, h)
+                pm.fill(Qt.transparent)
+                painter = QPainter(pm)
+                renderer.render(painter)
+                painter.end()
+                return QIcon(pm)
+        except Exception:
+            pass
+        return QIcon()
 
     def _open_help(self):
         try:
             dlg = HelpDialog(self)
             dlg.exec()
+        except Exception:
+            pass
+
+    def start_quick_tour(self):
+        try:
+            overlay = QuickTourOverlay(self)
+            overlay.show()
         except Exception:
             pass
 
@@ -230,7 +242,18 @@ class MainWindow(QMainWindow):
             self._act_tr.setText(t("language.turkish"))
         if hasattr(self, "_act_en"):
             self._act_en.setText(t("language.english"))
-
+        if hasattr(self, "_help_menu"):
+            self._help_menu.setTitle(t("help.help_title"))
+        if hasattr(self, "_act_help_center"):
+            self._act_help_center.setText(t("help.open_help"))
+        if hasattr(self, "_act_help_tour"):
+            self._act_help_tour.setText(t("help.start_tour"))
+        if hasattr(self, "_help_btn"):
+            self._help_btn.setText(t("help.help_title"))
+            self._help_btn.setToolTip(t("help.open_help"))
+        if hasattr(self, "_tour_btn"):
+            self._tour_btn.setText(t("help.start_tour"))
+            self._tour_btn.setToolTip(t("help.start_tour"))
         # Button shows currently selected language (with flag) and is wide enough
         if hasattr(self, "_lang_btn"):
             cur = getattr(self, "_current_lang", None)
@@ -254,8 +277,13 @@ class MainWindow(QMainWindow):
             self._lang_btn.setToolTip(t("language.menu_title"))
 
         # Ask children to retranslate if they support it
-        for w in (getattr(self, "login", None), getattr(self, "jobs_outputs", None), getattr(self, "directories", None),
-                  getattr(self, "editor", None), getattr(self, "logs", None)):
+        for w in (
+            getattr(self, "login", None),
+            getattr(self, "jobs_outputs", None),
+            getattr(self, "directories", None),
+            getattr(self, "editor", None),
+            getattr(self, "logs", None),
+        ):
             if w is not None and hasattr(w, "retranslate_ui"):
                 try:
                     w.retranslate_ui()
@@ -277,6 +305,16 @@ class MainWindow(QMainWindow):
         idx = self.tabs.indexOf(self.editor)
         if idx >= 0:
             self.tabs.setCurrentIndex(idx)
+
+    def on_script_submitted(self, job_id: str, script_path: str):
+        try:
+            idx = self.tabs.indexOf(self.jobs_outputs)
+            if idx >= 0:
+                self.tabs.setCurrentIndex(idx)
+            if hasattr(self.jobs_outputs, "focus_job"):
+                self.jobs_outputs.focus_job(job_id, script_path)
+        except Exception:
+            pass
 
     def _poll_jobs(self):
         # Called every 5s when connected; logs finished jobs to login console

@@ -1,5 +1,6 @@
 import sys
 import logging
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from truba_gui.core.i18n import load_saved_language, system_default_language
@@ -67,6 +68,13 @@ def main() -> int:
             dlg.exec()
             if dlg.dont_show_again_checked():
                 set_ui_pref_bool("show_welcome", False)
+    except Exception:
+        pass
+
+    # Auto-start quick tour unless user disabled it.
+    try:
+        if get_ui_pref_bool("show_tour", True):
+            QTimer.singleShot(250, w.start_quick_tour)
     except Exception:
         pass
 

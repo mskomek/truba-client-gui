@@ -214,6 +214,17 @@ class JobsOutputsWidget(QWidget):
         self.meta_text.setPlainText(txt)
         append_event({"type": "scontrol_show_job", "jobid": jobid})
 
+    def focus_job(self, jobid: str, script_path: str = ""):
+        """Focus a submitted job in the jobs UI and optionally bind outputs from script."""
+        if not jobid:
+            return
+        self.cancel_id.setText(jobid)
+        self.meta_job_id.setText(jobid)
+        self.refresh_jobs()
+        self.refresh_sacct()
+        if script_path:
+            self._activate_slurm_script(script_path)
+
     # ---------------- File open behaviors
     def load_one_file(self, remote_path: str):
         """

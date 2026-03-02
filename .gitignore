@@ -26,6 +26,7 @@ venv/
 # Third-party binaries (downloaded at runtime)
 src/truba_gui/third_party/
 third_party/
+**/third_party/
 
 # OS
 .DS_Store
@@ -37,3 +38,4 @@ Thumbs.db
 /build/
 /TrubaGUI.zip
 /.continue/
+/chatlogs/
