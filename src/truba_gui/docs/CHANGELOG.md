@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.0.3
+
+- Windows EXE hotfix: fixed `ModuleNotFoundError: No module named 'PySide6'` at startup by rebuilding with PySide6/shiboken6 available in the build environment.
+- Rebuilt release artifacts and refreshed packaged `CHANGELOG.txt`.
+
 ## v1.0.2
 
 - Added ARF-side quick action to create/edit Slurm scripts from templates in Directories.
