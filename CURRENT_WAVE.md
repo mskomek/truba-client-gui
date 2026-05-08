@@ -1,17 +1,16 @@
 # CURRENT_WAVE.md
 
 ## Wave
-wave_001_agent_workflow_foundation
+wave_022_ansi_vt_terminal_emulation
 
 ## Status
-ACTIVE
+COMPLETE
 
 ## Source
-waves/active/wave_001_agent_workflow_foundation.md
+waves/done/wave_022_ansi_vt_terminal_emulation.md
 
 ## Current Task
-TASK-001.1
+TASK-022.1
 
 ## Rule
-Only tasks belonging to this wave may be worked on.
-No future wave work is allowed unless the Architect explicitly activates a new wave.
+Implement ANSI/VT terminal emulation in small bounded slices.

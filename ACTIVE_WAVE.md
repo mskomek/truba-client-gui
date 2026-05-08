@@ -1,6 +1,6 @@
 # ACTIVE_WAVE.md
 
-status: active
-wave_id: wave_001_agent_workflow_foundation
-wave_file: waves/active/wave_001_agent_workflow_foundation.md
-next_action: validate-and-accept-foundation
+status: done
+wave_id: wave_022_ansi_vt_terminal_emulation
+wave_file: waves/done/wave_022_ansi_vt_terminal_emulation.md
+next_action: no actionable waves remain

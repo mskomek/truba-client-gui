@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+import time
 from dataclasses import dataclass
 from typing import Callable, Optional, Tuple
 
@@ -11,6 +13,86 @@ import paramiko
 
 from truba_gui.core.logging import get_logger
 from truba_gui.services.command_history_store import is_sensitive_command
+
+
+_ACS_MAP = {
+    "j": "┘",
+    "k": "┐",
+    "l": "┌",
+    "m": "└",
+    "n": "┼",
+    "q": "─",
+    "t": "├",
+    "u": "┤",
+    "v": "┴",
+    "w": "┬",
+    "x": "│",
+    "o": "█",
+    "s": "·",
+    "a": "▒",
+    "f": "°",
+    "g": "±",
+    "h": "␋",
+    "i": "␌",
+    "`": "◆",
+}
+
+
+def _sanitize_terminal_text(text: str) -> str:
+    """Remove terminal control sequences and normalize redraw-heavy output."""
+    if not text:
+        return ""
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    out: list[str] = []
+    alt_charset = False
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        code = ord(ch)
+        if ch == "\x1b" and i + 1 < n:
+            nxt = text[i + 1]
+            if nxt == "[":
+                i += 2
+                while i < n and not ("@" <= text[i] <= "~"):
+                    i += 1
+                i += 1
+                continue
+            if nxt in "()":
+                if i + 2 < n:
+                    spec = nxt + text[i + 2]
+                    if spec in ("(0", ")0"):
+                        alt_charset = True
+                    elif spec in ("(B", ")B"):
+                        alt_charset = False
+                i += 3
+                continue
+            if nxt in "PX^_":
+                i += 2
+                while i < n:
+                    if text[i] == "\x1b" and i + 1 < n and text[i + 1] == "\\":
+                        i += 2
+                        break
+                    i += 1
+                continue
+            if "@" <= nxt <= "_":
+                i += 2
+                continue
+            i += 1
+            continue
+        if ch in ("\x0e", "\x0f"):
+            alt_charset = ch == "\x0e"
+            i += 1
+            continue
+        if code < 32 and ch not in ("\n", "\t"):
+            i += 1
+            continue
+        if alt_charset and ch in _ACS_MAP:
+            out.append(_ACS_MAP[ch])
+        else:
+            out.append(ch)
+        i += 1
+    return "".join(out)
 
 
 @dataclass
@@ -30,13 +112,19 @@ class SSHClientWrapper:
         info: Optional[SSHConnInfo] = None,
         logger: Optional[Callable[[str], None]] = None,
         log_cb: Optional[Callable[[str], None]] = None,
+        shell_output_cb: Optional[Callable[[str], None]] = None,
     ):
         # Accept both `logger` and legacy `log_cb` kwarg.
         # Also allow passing SSHConnInfo as first positional arg (info).
         self.info: Optional[SSHConnInfo] = info
         self.client: Optional[paramiko.SSHClient] = None
         self.sftp = None
+        self._shell_channel = None
+        self._shell_thread: Optional[threading.Thread] = None
+        self._shell_stop = threading.Event()
+        self._shell_geometry: Tuple[int, int] = (120, 40)
         self._log = logger or log_cb
+        self._shell_output_cb = shell_output_cb
         self._filelog = get_logger("truba_gui.ssh")
 
     def log(self, msg: str) -> None:
@@ -52,7 +140,12 @@ class SSHClientWrapper:
             except Exception:
                 pass
 
-    def connect(self, info: Optional[SSHConnInfo] = None) -> None:
+    def connect(
+        self,
+        info: Optional[SSHConnInfo] = None,
+        *,
+        shell_size: Optional[Tuple[int, int]] = None,
+    ) -> None:
         info = info or self.info
         if info is None:
             raise ValueError('SSH connection info not provided')
@@ -79,6 +172,9 @@ class SSHClientWrapper:
                 username=info.username,
                 pkey=pkey,
                 timeout=15,
+                banner_timeout=30,
+                auth_timeout=30,
+                channel_timeout=30,
                 allow_agent=True,
                 look_for_keys=True,
             )
@@ -89,14 +185,166 @@ class SSHClientWrapper:
                 username=info.username,
                 password=info.password,
                 timeout=15,
+                banner_timeout=30,
+                auth_timeout=30,
+                channel_timeout=30,
                 allow_agent=True,
                 look_for_keys=True,
             )
+        transport = self.client.get_transport()
+        if transport is not None:
+            banner = transport.get_banner()
+            if banner:
+                if isinstance(banner, bytes):
+                    banner = banner.decode(errors="replace")
+                self.log(str(banner).rstrip("\r\n"))
+        if shell_size is not None:
+            cols, rows = shell_size
+            self._shell_geometry = (max(1, int(cols)), max(1, int(rows)))
+        self._start_shell_session()
         self.sftp = self.client.open_sftp()
         self.log("SSH: connected, SFTP ready")
 
+    def _start_shell_session(self) -> None:
+        if not self.client:
+            return
+        self._stop_shell_session()
+        try:
+            transport = self.client.get_transport()
+            if transport is None or not transport.is_active():
+                return
+            cols, rows = self._shell_geometry
+            channel = self.client.invoke_shell(term="xterm", width=cols, height=rows)
+            try:
+                channel.settimeout(0.2)
+            except Exception:
+                pass
+        except Exception as exc:
+            self.log(f"SSH: interactive shell unavailable ({exc})")
+            return
+
+        self._shell_channel = channel
+        self._shell_stop = threading.Event()
+        self._shell_thread = threading.Thread(
+            target=self._shell_reader_loop,
+            args=(channel,),
+            name="truba_gui_ssh_shell",
+            daemon=True,
+        )
+        self._drain_initial_shell_output(channel)
+        self._shell_thread.start()
+        self.log("SSH: interactive shell session started")
+
+    def resize_shell_pty(self, cols: int, rows: int) -> None:
+        cols = max(1, int(cols))
+        rows = max(1, int(rows))
+        self._shell_geometry = (cols, rows)
+        channel = self._shell_channel
+        if channel is None:
+            return
+        try:
+            channel.resize_pty(width=cols, height=rows)
+        except Exception:
+            pass
+
+    def send_shell_text(self, text: str) -> bool:
+        channel = self._shell_channel
+        if channel is None or getattr(channel, "closed", False):
+            return False
+        payload = (text or "").rstrip("\r\n")
+        if not payload:
+            return True
+        try:
+            sent = channel.send(payload + "\n")
+            return sent > 0
+        except Exception:
+            return False
+
+    def send_shell_input(self, data: str) -> bool:
+        channel = self._shell_channel
+        if channel is None or getattr(channel, "closed", False):
+            return False
+        payload = data or ""
+        if not payload:
+            return True
+        try:
+            sent = channel.send(payload)
+            return sent > 0
+        except Exception:
+            return False
+
+    def _drain_initial_shell_output(self, channel, duration: float = 0.35) -> None:
+        deadline = time.monotonic() + duration
+        while time.monotonic() < deadline and not self._shell_stop.is_set():
+            try:
+                if not channel.recv_ready():
+                    time.sleep(0.05)
+                    continue
+                data = channel.recv(4096)
+                if not data:
+                    break
+                self._handle_shell_output(data.decode(errors="replace"))
+            except socket.timeout:
+                continue
+            except Exception:
+                break
+
+    def _shell_reader_loop(self, channel) -> None:
+        while not self._shell_stop.is_set():
+            try:
+                if channel.recv_ready():
+                    data = channel.recv(4096)
+                    if data:
+                        self._handle_shell_output(data.decode(errors="replace"))
+                    continue
+                if getattr(channel, "closed", False) or channel.exit_status_ready():
+                    break
+            except socket.timeout:
+                continue
+            except Exception as exc:
+                if not self._shell_stop.is_set():
+                    self.log(f"SSH: shell session read failed ({exc})")
+                break
+            time.sleep(0.1)
+
+    def _handle_shell_output(self, text: str) -> None:
+        if not text:
+            return
+        if self._shell_output_cb is not None:
+            try:
+                self._shell_output_cb(text)
+                return
+            except Exception:
+                pass
+        sanitized = _sanitize_terminal_text(text)
+        if sanitized.strip():
+            self.log(sanitized.rstrip("\n"))
+
+    def _stop_shell_session(self) -> None:
+        self._shell_stop.set()
+        channel = self._shell_channel
+        self._shell_channel = None
+        thread = self._shell_thread
+        self._shell_thread = None
+        try:
+            if channel is not None:
+                try:
+                    channel.close()
+                except Exception:
+                    pass
+        finally:
+            if thread is not None and thread.is_alive() and thread is not threading.current_thread():
+                try:
+                    thread.join(timeout=1.0)
+                except Exception:
+                    pass
+
     def close(self) -> None:
         self.log("SSH: closing")
+        try:
+            self._stop_shell_session()
+        except Exception:
+            pass
         try:
             if self.sftp:
                 self.sftp.close()
@@ -136,9 +384,9 @@ class SSHClientWrapper:
             code = 124
             timed_out = True
         if out.strip():
-            self.log(out.rstrip())
+            self.log(_sanitize_terminal_text(out).rstrip("\n"))
         if err.strip():
-            self.log("STDERR:\n" + err.rstrip())
+            self.log("STDERR:\n" + _sanitize_terminal_text(err).rstrip("\n"))
         dt = timed() - t0
         if timed_out:
             self.log(f"[timeout after {dt:.1f}s exit={code}]")
