@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-05-08
+- Workflow: added the wave foundation for `wave_000`-`wave_022` and the read-only MCP bridge used for workflow and state inspection.
+- Connection UI: refined the connection flow and settings dialog.
+- SSH/Terminal: improved the login console and terminal experience, including interactive shell support, PTY resize handling, and cleaner ANSI/VT rendering.
+- Directories/Jobs: improved directory navigation and Jobs subtab behavior.
+- Localization: fixed Turkish i18n encoding issues so translated strings render correctly.
+- Sessions: added saved session context edit and removal, and removed the start tour.
+
 ## 2026-01-31
 - Fix: Prevent starting a second VcXsrv instance when display port is already listening (avoids 'another window manager is running').
 - X11: Login ekranındaki `SSH$` komut satırında X11 forwarding açıkken GUI komutları (`xclock`, `matlab`, `xterm` vb.) Paramiko ile değil sistem `ssh/plink` ile çalıştırılacak şekilde düzenlendi. Bu sayede pencere TrubaGUI içinde sekme açmadan Windows'ta ayrı X11 penceresi olarak açılır.

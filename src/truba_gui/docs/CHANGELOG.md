@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-05-08
+- Workflow: added the wave foundation for `wave_000`-`wave_022` and the read-only MCP bridge used for workflow and state inspection.
+- Connection UI: refined the connection flow and settings dialog.
+- SSH/Terminal: improved the login console and terminal experience, including interactive shell support, PTY resize handling, and cleaner ANSI/VT rendering.
+- Directories/Jobs: improved directory navigation and Jobs subtab behavior.
+- Localization: fixed Turkish i18n encoding issues so translated strings render correctly.
+- Sessions: added saved session context edit and removal, and removed the start tour.
+
 ## v1.0.3
 
 - Windows EXE hotfix: fixed `ModuleNotFoundError: No module named 'PySide6'` at startup by rebuilding with PySide6/shiboken6 available in the build environment.
