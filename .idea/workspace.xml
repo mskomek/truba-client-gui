@@ -5,39 +5,7 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="69e15ec2-c9bf-4051-963d-6ce4d4cf9cbc" name="Changes" comment="v1.0.0">
-      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/AGENTS.md" beforeDir="false" afterPath="$PROJECT_DIR$/AGENTS.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/MASTER_CONTEXT_ACTIVE.md" beforeDir="false" afterPath="$PROJECT_DIR$/MASTER_CONTEXT_ACTIVE.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/README_AGENT_WORKFLOW.md" beforeDir="false" afterPath="$PROJECT_DIR$/README_AGENT_WORKFLOW.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/SESSION_RULES.md" beforeDir="false" afterPath="$PROJECT_DIR$/SESSION_RULES.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/TESTING.md" beforeDir="false" afterPath="$PROJECT_DIR$/TESTING.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/WAVES.md" beforeDir="false" afterPath="$PROJECT_DIR$/WAVES.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/reports/BUILD_REPORT.md" beforeDir="false" afterPath="$PROJECT_DIR$/reports/BUILD_REPORT.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/reports/TEST_REPORT.md" beforeDir="false" afterPath="$PROJECT_DIR$/reports/TEST_REPORT.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/reports/WAVE_REPORT.md" beforeDir="false" afterPath="$PROJECT_DIR$/reports/WAVE_REPORT.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/rules.md" beforeDir="false" afterPath="$PROJECT_DIR$/rules.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/runner/prompts/architect.md" beforeDir="false" afterPath="$PROJECT_DIR$/runner/prompts/architect.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/truba_gui/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/truba_gui/app.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/truba_gui/i18n/en.json" beforeDir="false" afterPath="$PROJECT_DIR$/src/truba_gui/i18n/en.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/truba_gui/i18n/tr.json" beforeDir="false" afterPath="$PROJECT_DIR$/src/truba_gui/i18n/tr.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/truba_gui/ui/dialogs/help_dialog.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/truba_gui/ui/dialogs/help_dialog.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/truba_gui/ui/dialogs/quick_tour.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/truba_gui/ui/dialogs/quick_tour.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/truba_gui/ui/main_window.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/truba_gui/ui/main_window.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/truba_gui/ui/widgets/jobs_outputs_widget.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/truba_gui/ui/widgets/jobs_outputs_widget.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/truba_gui/ui/widgets/remote_dir_panel.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/truba_gui/ui/widgets/remote_dir_panel.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/waves/active/wave_001_agent_workflow_foundation.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/waves/pending/wave_000_context_and_agent_docs_foundation.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/waves/pending/wave_001_codex_architect_bootstrap.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/waves/pending/wave_002_runner_loop_foundation.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/waves/pending/wave_003_ollama_builder_integration.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/waves/pending/wave_004_ollama_tester_integration.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/waves/pending/wave_005_builder_tester_loop_completion.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/waves/pending/wave_006_task_safety_guardrails.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/waves/pending/wave_007_test_command_orchestration.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/waves/pending/wave_008_codex_architect_flow.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/waves/pending/wave_009_first_end_to_end_dry_run.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/waves/pending/wave_010_mcp_bridge_foundation.md" beforeDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
