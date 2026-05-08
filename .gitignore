@@ -36,6 +36,9 @@ Thumbs.db
 .vscode/
 .idea/
 /build/
+!/build/
+!/build/windows/
+!/build/windows/**
 /TrubaGUI.zip
 /.continue/
 /chatlogs/

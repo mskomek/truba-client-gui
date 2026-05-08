@@ -4,8 +4,71 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="69e15ec2-c9bf-4051-963d-6ce4d4cf9cbc" name="Changes" comment="v1.0.0">
+    <list default="true" id="69e15ec2-c9bf-4051-963d-6ce4d4cf9cbc" name="Changes" comment="workspace edit">
+      <change afterPath="$PROJECT_DIR$/build/windows/truba-client-gui.ico" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/build/windows/truba-client-gui.spec" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/build/windows/version_info.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release/truba-client-gui/CHANGELOG.txt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/base_library.zip" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/base_library.zip" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/cryptography-44.0.2.dist-info/INSTALLER" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/cryptography-44.0.2.dist-info/METADATA" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/cryptography-44.0.2.dist-info/RECORD" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/cryptography-44.0.2.dist-info/WHEEL" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/cryptography-44.0.2.dist-info/licenses/LICENSE" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/cryptography-44.0.2.dist-info/licenses/LICENSE.APACHE" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/cryptography-44.0.2.dist-info/licenses/LICENSE.BSD" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/truba_gui/assets/flags/gb.svg" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/truba_gui/assets/flags/gb.svg" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/truba_gui/assets/flags/tr.svg" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/truba_gui/assets/flags/tr.svg" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/truba_gui/assets/icons/help.svg" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/truba_gui/assets/icons/help.svg" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/truba_gui/docs/CHANGELOG.md" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/truba_gui/docs/CHANGELOG.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/truba_gui/docs/HELP.md" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/truba_gui/docs/HELP.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/truba_gui/docs/HELP_LIBRARY_GENERIC_en.md" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/truba_gui/docs/HELP_LIBRARY_GENERIC_en.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/truba_gui/docs/HELP_LIBRARY_GENERIC_tr.md" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/truba_gui/docs/HELP_LIBRARY_GENERIC_tr.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/truba_gui/docs/HELP_LIBRARY_TRUBA_en.md" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/truba_gui/docs/HELP_LIBRARY_TRUBA_en.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/truba_gui/docs/HELP_LIBRARY_TRUBA_tr.md" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/truba_gui/docs/HELP_LIBRARY_TRUBA_tr.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/truba_gui/docs/HELP_en.md" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/truba_gui/docs/HELP_en.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/truba_gui/docs/HELP_tr.md" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/truba_gui/docs/HELP_tr.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/truba_gui/docs/PRODUCTION_CHECKLIST.md" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/truba_gui/docs/PRODUCTION_CHECKLIST.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/truba_gui/docs/WELCOME.md" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/truba_gui/docs/WELCOME.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/truba_gui/docs/WELCOME_en.md" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/truba_gui/docs/WELCOME_en.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/truba_gui/docs/WELCOME_tr.md" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/truba_gui/docs/WELCOME_tr.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/truba_gui/i18n/en.json" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/truba_gui/i18n/en.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/truba_gui/i18n/tr.json" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release/truba-client-gui/_internal/truba_gui/i18n/tr.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release/truba-client-gui/truba-client-gui.exe" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release/truba-client-gui/truba-client-gui.exe" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release/truba-client-gui_v1.0.2_windows_onedir.zip" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release/truba-client-gui_v1.0.2_windows_onedir.zip" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release/truba-client-gui_v1.0.2_windows_onedir.zip.sha256" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release/truba-client-gui_v1.0.2_windows_onedir.zip.sha256" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/CHANGELOG.txt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/base_library.zip" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/base_library.zip" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/cryptography-44.0.2.dist-info/INSTALLER" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/cryptography-44.0.2.dist-info/METADATA" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/cryptography-44.0.2.dist-info/RECORD" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/cryptography-44.0.2.dist-info/WHEEL" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/cryptography-44.0.2.dist-info/licenses/LICENSE" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/cryptography-44.0.2.dist-info/licenses/LICENSE.APACHE" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/cryptography-44.0.2.dist-info/licenses/LICENSE.BSD" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/truba_gui/assets/flags/gb.svg" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/truba_gui/assets/flags/gb.svg" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/truba_gui/assets/flags/tr.svg" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/truba_gui/assets/flags/tr.svg" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/truba_gui/assets/icons/help.svg" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/truba_gui/assets/icons/help.svg" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/truba_gui/docs/CHANGELOG.md" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/truba_gui/docs/CHANGELOG.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/truba_gui/docs/HELP.md" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/truba_gui/docs/HELP.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/truba_gui/docs/HELP_LIBRARY_GENERIC_en.md" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/truba_gui/docs/HELP_LIBRARY_GENERIC_en.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/truba_gui/docs/HELP_LIBRARY_GENERIC_tr.md" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/truba_gui/docs/HELP_LIBRARY_GENERIC_tr.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/truba_gui/docs/HELP_LIBRARY_TRUBA_en.md" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/truba_gui/docs/HELP_LIBRARY_TRUBA_en.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/truba_gui/docs/HELP_LIBRARY_TRUBA_tr.md" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/truba_gui/docs/HELP_LIBRARY_TRUBA_tr.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/truba_gui/docs/HELP_en.md" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/truba_gui/docs/HELP_en.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/truba_gui/docs/HELP_tr.md" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/truba_gui/docs/HELP_tr.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/truba_gui/docs/PRODUCTION_CHECKLIST.md" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/truba_gui/docs/PRODUCTION_CHECKLIST.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/truba_gui/docs/WELCOME.md" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/truba_gui/docs/WELCOME.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/truba_gui/docs/WELCOME_en.md" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/truba_gui/docs/WELCOME_en.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/truba_gui/docs/WELCOME_tr.md" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/truba_gui/docs/WELCOME_tr.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/truba_gui/i18n/en.json" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/truba_gui/i18n/en.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/truba_gui/i18n/tr.json" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/_internal/truba_gui/i18n/tr.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/truba-client-gui.exe" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release_fix/truba-client-gui/truba-client-gui.exe" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release_fix/truba-client-gui_v1.0.2_fix_windows_onedir.zip" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release_fix/truba-client-gui_v1.0.2_fix_windows_onedir.zip" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release_fix/truba-client-gui_v1.0.2_fix_windows_onedir.zip.sha256" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release_fix/truba-client-gui_v1.0.2_fix_windows_onedir.zip.sha256" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dist_release_fix/truba-client-gui_v1.0.3_windows.exe" beforeDir="false" afterPath="$PROJECT_DIR$/dist_release_fix/truba-client-gui_v1.0.3_windows.exe" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -31,31 +94,32 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
-    &quot;Python.__main__.executor&quot;: &quot;Run&quot;,
-    &quot;Python.clean_src_pycache (1).executor&quot;: &quot;Run&quot;,
-    &quot;Python.clean_src_pycache.executor&quot;: &quot;Run&quot;,
-    &quot;RunOnceActivity.MCP Project settings loaded&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
-    &quot;com.intellij.ml.llm.matterhorn.ej.ui.settings.DefaultModelSelectionForGA.v1&quot;: &quot;true&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;codex/develop&quot;,
-    &quot;ignore.virus.scanning.warn.message&quot;: &quot;true&quot;,
-    &quot;junie.onboarding.icon.badge.shown&quot;: &quot;true&quot;,
-    &quot;last_opened_file_path&quot;: &quot;D:/Projeler/TrubaGUI/scripts&quot;,
-    &quot;to.speed.mode.migration.done&quot;: &quot;true&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "Python.__main__.executor": "Run",
+    "Python.clean_src_pycache (1).executor": "Run",
+    "Python.clean_src_pycache.executor": "Run",
+    "RunOnceActivity.MCP Project settings loaded": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "com.intellij.ml.llm.matterhorn.ej.ui.settings.DefaultModelSelectionForGA.v1": "true",
+    "git-widget-placeholder": "main",
+    "ignore.virus.scanning.warn.message": "true",
+    "junie.onboarding.icon.badge.shown": "true",
+    "last_opened_file_path": "D:/Projeler/TrubaGUI/scripts",
+    "settings.editor.selected.configurable": "ml.llm.LLMThirdPartyAiProvidersConfigurable",
+    "to.speed.mode.migration.done": "true"
   }
-}</component>
+}]]></component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="D:\Projeler\TrubaGUI\scripts" />
       <recent name="D:\Projeler\TrubaGUI" />
     </key>
   </component>
-  <component name="RunManager" selected="Python.__main__">
+  <component name="RunManager" selected="Python.clean_src_pycache (1)">
     <configuration name="__main__" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="TrubaGUI" />
       <option name="ENV_FILES" value="" />
@@ -150,9 +214,9 @@
     </configuration>
     <recent_temporary>
       <list>
+        <item itemvalue="Python.clean_src_pycache (1)" />
         <item itemvalue="Python.__main__" />
         <item itemvalue="Python.runner" />
-        <item itemvalue="Python.clean_src_pycache (1)" />
         <item itemvalue="Python.clean_src_pycache" />
       </list>
     </recent_temporary>
@@ -180,12 +244,21 @@
       <option name="project" value="LOCAL" />
       <updated>1778090033367</updated>
     </task>
-    <option name="localTasksCounter" value="2" />
+    <task id="LOCAL-00002" summary="workspace edit">
+      <option name="closed" value="true" />
+      <created>1778258118282</created>
+      <option name="number" value="00002" />
+      <option name="presentableId" value="LOCAL-00002" />
+      <option name="project" value="LOCAL" />
+      <updated>1778258118282</updated>
+    </task>
+    <option name="localTasksCounter" value="3" />
     <servers />
   </component>
   <component name="VcsManagerConfiguration">
     <MESSAGE value="v1.0.0" />
-    <option name="LAST_COMMIT_MESSAGE" value="v1.0.0" />
+    <MESSAGE value="workspace edit" />
+    <option name="LAST_COMMIT_MESSAGE" value="workspace edit" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
