@@ -1,12 +1,12 @@
 # Changelog
 
 ## 2026-05-08
-- Workflow: added the wave foundation for `wave_000`-`wave_022` and the read-only MCP bridge used for workflow and state inspection.
-- Connection UI: refined the connection flow and settings dialog.
-- SSH/Terminal: improved the login console and terminal experience, including interactive shell support, PTY resize handling, and cleaner ANSI/VT rendering.
-- Directories/Jobs: improved directory navigation and Jobs subtab behavior.
+- Connection: removed the Start Tour from the normal flow and added a dedicated Add Connection dialog plus a Settings dialog for app-level options.
+- Connection console: improved login output, prompt rendering, PTY resize handling, and interactive shell routing.
+- Terminal rendering: added ANSI/VT emulation so redraw, cursor movement, box drawing, and dialog-style screens render more correctly.
+- Navigation: fixed saved session context editing, prevented unwanted auto-switching back to the Connection tab, and improved directory double-click plus parent-folder navigation.
+- Jobs: split the Jobs area into clearer sub-tabs for accounting/details and outputs.
 - Localization: fixed Turkish i18n encoding issues so translated strings render correctly.
-- Sessions: added saved session context edit and removal, and removed the start tour.
 
 ## v1.0.3
 
