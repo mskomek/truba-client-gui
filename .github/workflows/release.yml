@@ -26,7 +26,7 @@ jobs:
           pip install pyinstaller
       - name: Build release artifacts
         shell: pwsh
-        run: ./scripts/release.ps1 -Version "${{ github.event.inputs.version }}"
+        run: ./scripts/release.ps1 -Version "${{ github.event.inputs.version }}" -ReleaseRoot "dist/releases"
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         env:
@@ -34,9 +34,9 @@ jobs:
         with:
           tag_name: v${{ github.event.inputs.version }}
           name: v${{ github.event.inputs.version }}
-          body_path: dist/CHANGELOG_v${{ github.event.inputs.version }}.md
+          body_path: dist/releases/v${{ github.event.inputs.version }}/CHANGELOG.md
           files: |
-            dist/CHANGELOG_v${{ github.event.inputs.version }}.md
-            dist/truba-client-gui_v${{ github.event.inputs.version }}_windows.exe
-            dist/truba-client-gui_v${{ github.event.inputs.version }}_windows_onedir.zip
-            dist/truba-client-gui_v${{ github.event.inputs.version }}_windows_onedir.zip.sha256
+            dist/releases/v${{ github.event.inputs.version }}/CHANGELOG.md
+            dist/releases/v${{ github.event.inputs.version }}/truba-client-gui_v${{ github.event.inputs.version }}_windows.exe
+            dist/releases/v${{ github.event.inputs.version }}/truba-client-gui_v${{ github.event.inputs.version }}_windows_onedir.zip
+            dist/releases/v${{ github.event.inputs.version }}/truba-client-gui_v${{ github.event.inputs.version }}_windows_onedir.zip.sha256

@@ -14,8 +14,6 @@ venv/
 !/build/windows/**
 /build_release/
 /build_release_fix/
-/dist_release/
-/dist_release_fix/
 /reports/
 
 # Qt / PySide
