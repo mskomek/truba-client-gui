@@ -26,15 +26,15 @@ This repository now contains a wave-based agent workflow tailored to the actual 
 
 ## Next Recommended Step
 
-Implement **Phase 2**:
-- create `runner/runner.py`
-- wire Builder and Tester calls to Ollama
-- parse PASS / FAIL / BLOCKED
-- support resume from `agent_state.json`
+Implement **Phase 3**:
+- create a read-only local MCP bridge for workflow state and reports
+- wire Codex to the bridge through `~/.codex/config.toml`
+- keep the bridge bound to `127.0.0.1`
+- expose state and report reads before any write-capable actions
 
 ## Suggested First Real Product Waves
 
-After the runner exists, start with one of:
+After the bridge exists, continue with one of:
 - connection/session diagnostics
 - editor + Slurm submit flow hardening
 - file manager reliability improvements

@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QStyle,
+    QToolButton,
     QTabWidget,
     QTreeWidget,
     QTreeWidgetItem,
@@ -279,7 +280,7 @@ class _RemoteTree(QTreeWidget):
 
 
 class RemoteDirPanel(QWidget):
-    open_file = Signal(str)  # remote path (double click)
+    open_file = Signal(str)  # remote path (file double click)
     open_in_slot = Signal(int, str)  # slot_index(0/1), remote path
 
     # registry to refresh source/target panels on move
@@ -316,6 +317,13 @@ class RemoteDirPanel(QWidget):
         self.btn_undo = QPushButton(t("dirs.undo") if t("dirs.undo") != "[dirs.undo]" else "Geri Al")
         self.btn_undo.clicked.connect(self.undo_last)
 
+        self.btn_parent = QToolButton()
+        self.btn_parent.setAutoRaise(False)
+        self.btn_parent.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.btn_parent.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowUp))
+        self.btn_parent.clicked.connect(self.go_parent)
+        self.btn_parent.setEnabled(False)
+
         self.btn_refresh = QPushButton(t("dirs.refresh") if t("dirs.refresh") != "[dirs.refresh]" else "Yenile")
         self.btn_refresh.clicked.connect(self.refresh)
 
@@ -326,6 +334,7 @@ class RemoteDirPanel(QWidget):
         top.addWidget(self.btn_download)
         top.addWidget(self.btn_delete)
         top.addWidget(self.btn_undo)
+        top.addWidget(self.btn_parent)
         top.addWidget(self.btn_refresh)
 
         self.tabs = QTabWidget()
@@ -373,6 +382,7 @@ class RemoteDirPanel(QWidget):
         lay.addWidget(self.queue_group)
 
         self._update_undo_enabled()
+        self._update_navigation_controls()
 
     def _make_view(self) -> _RemoteTree:
         w = _RemoteTree(panel=self)
@@ -388,7 +398,7 @@ class RemoteDirPanel(QWidget):
         w.setRootIsDecorated(False)
         w.setAlternatingRowColors(True)
         w.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
-        w.itemDoubleClicked.connect(lambda item, col: self.open_file.emit(str(item.data(0, Qt.ItemDataRole.UserRole) or "")))
+        w.itemDoubleClicked.connect(self._handle_item_double_clicked)
         w.header().setStretchLastSection(True)
         w.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         w.customContextMenuRequested.connect(lambda pos, view=w: self._on_context_menu(view, pos))
@@ -414,11 +424,42 @@ class RemoteDirPanel(QWidget):
 
     def set_session(self, session):
         self.session = session
+        self._update_navigation_controls()
 
     def set_dir(self, remote_dir: str):
         self.current_dir = remote_dir
         self.path.setText(remote_dir)
+        self._update_navigation_controls()
         self.refresh()
+
+    def _remote_parent_dir(self, remote_dir: str) -> str:
+        cleaned = (remote_dir or "").rstrip("/")
+        if not cleaned or cleaned == "/":
+            return ""
+        parent = cleaned.rsplit("/", 1)[0]
+        return parent or "/"
+
+    def _update_navigation_controls(self) -> None:
+        has_session = bool(self.session and self.session.get("connected"))
+        has_parent = bool(self._remote_parent_dir(self.current_dir)) if has_session else False
+        if hasattr(self, "btn_parent"):
+            self.btn_parent.setEnabled(has_parent)
+
+    def _handle_item_double_clicked(self, item, col):
+        path = str(item.data(0, Qt.ItemDataRole.UserRole) or "")
+        if not path:
+            return
+        is_dir = bool(item.data(0, Qt.ItemDataRole.UserRole + 1))
+        if is_dir:
+            self.set_dir(path.rstrip("/") or "/")
+            return
+        self.open_file.emit(path)
+
+    def go_parent(self):
+        parent = self._remote_parent_dir(self.current_dir)
+        if not parent:
+            return
+        self.set_dir(parent)
 
     def _icon_for(self, entry: RemoteEntry) -> QIcon:
         st = self.style()
@@ -433,6 +474,7 @@ class RemoteDirPanel(QWidget):
         if not self.session or not self.session.get("files"):
             for v in self.views.values():
                 v.clear()
+            self._update_navigation_controls()
             return
 
         files = self.session["files"]
@@ -460,6 +502,24 @@ class RemoteDirPanel(QWidget):
             it.setData(0, Qt.ItemDataRole.UserRole + 1, bool(entry.is_dir))
             view.addTopLevelItem(it)
 
+        parent_dir = self._remote_parent_dir(self.current_dir)
+        if parent_dir:
+            def make_parent_item() -> QTreeWidgetItem:
+                item = QTreeWidgetItem()
+                item.setText(0, "..")
+                item.setIcon(0, self.style().standardIcon(QStyle.StandardPixmap.SP_DirIcon))
+                item.setText(1, "")
+                item.setText(2, _file_type("..", True))
+                item.setText(3, "")
+                item.setData(0, Qt.ItemDataRole.UserRole, parent_dir)
+                item.setData(0, Qt.ItemDataRole.UserRole + 1, True)
+                item.setData(0, Qt.ItemDataRole.UserRole + 2, True)
+                return item
+
+            self.views["all"].addTopLevelItem(make_parent_item())
+            if "folders" in self.views:
+                self.views["folders"].addTopLevelItem(make_parent_item())
+
         for e in entries:
             add(self.views["all"], e)
             cat = _category(e)
@@ -473,11 +533,14 @@ class RemoteDirPanel(QWidget):
             v.resizeColumnToContents(3)
 
         self._update_undo_enabled()
+        self._update_navigation_controls()
 
     # ---------- selection helpers ----------
     def _selected_paths_from_view(self, view: QTreeWidget) -> List[str]:
         paths: List[str] = []
         for it in view.selectedItems():
+            if bool(it.data(0, Qt.ItemDataRole.UserRole + 2)):
+                continue
             p = it.data(0, Qt.ItemDataRole.UserRole)
             if p:
                 paths.append(str(p))
@@ -591,8 +654,9 @@ class RemoteDirPanel(QWidget):
         clicked_path: Optional[str] = None
         clicked_is_dir = False
         if item is not None:
-            clicked_path = str(item.data(0, Qt.ItemDataRole.UserRole) or "")
-            clicked_is_dir = bool(item.data(0, Qt.ItemDataRole.UserRole + 1))
+            if not bool(item.data(0, Qt.ItemDataRole.UserRole + 2)):
+                clicked_path = str(item.data(0, Qt.ItemDataRole.UserRole) or "")
+                clicked_is_dir = bool(item.data(0, Qt.ItemDataRole.UserRole + 1))
 
         sel_paths = self._selected_paths_from_view(view)
         if not sel_paths and clicked_path:

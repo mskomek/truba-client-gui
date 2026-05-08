@@ -14,6 +14,9 @@ At session start, read only:
 
 Then load only the source files required for the active task.
 
+If the active wave is about workflow docs, include the relevant prompt and state files in the required source set before editing.
+If the active wave is about the MCP bridge, include the local bridge server, Codex config example, and the active workflow state files before editing.
+
 ## Repository Scanning Limits
 
 Do not recursively inspect the whole repo unless the active task truly requires it.
@@ -35,6 +38,8 @@ If a necessary file is missing from Allowed Files:
 - stop
 - return `BLOCKED`
 - explain which file is needed and why
+
+Workflow-doc waves still follow the same rule; the allowed-file list must explicitly name the prompt and state files being updated.
 
 ## Build / Test Evidence Rule
 

@@ -4,12 +4,40 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="69e15ec2-c9bf-4051-963d-6ce4d4cf9cbc" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/scripts/clean_src_pycache.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/TrubaGUI.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/TrubaGUI.iml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/encodings.xml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/vcs.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
+    <list default="true" id="69e15ec2-c9bf-4051-963d-6ce4d4cf9cbc" name="Changes" comment="v1.0.0">
+      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/AGENTS.md" beforeDir="false" afterPath="$PROJECT_DIR$/AGENTS.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/MASTER_CONTEXT_ACTIVE.md" beforeDir="false" afterPath="$PROJECT_DIR$/MASTER_CONTEXT_ACTIVE.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README_AGENT_WORKFLOW.md" beforeDir="false" afterPath="$PROJECT_DIR$/README_AGENT_WORKFLOW.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/SESSION_RULES.md" beforeDir="false" afterPath="$PROJECT_DIR$/SESSION_RULES.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/TESTING.md" beforeDir="false" afterPath="$PROJECT_DIR$/TESTING.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/WAVES.md" beforeDir="false" afterPath="$PROJECT_DIR$/WAVES.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/reports/BUILD_REPORT.md" beforeDir="false" afterPath="$PROJECT_DIR$/reports/BUILD_REPORT.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/reports/TEST_REPORT.md" beforeDir="false" afterPath="$PROJECT_DIR$/reports/TEST_REPORT.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/reports/WAVE_REPORT.md" beforeDir="false" afterPath="$PROJECT_DIR$/reports/WAVE_REPORT.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/rules.md" beforeDir="false" afterPath="$PROJECT_DIR$/rules.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/runner/prompts/architect.md" beforeDir="false" afterPath="$PROJECT_DIR$/runner/prompts/architect.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/truba_gui/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/truba_gui/app.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/truba_gui/i18n/en.json" beforeDir="false" afterPath="$PROJECT_DIR$/src/truba_gui/i18n/en.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/truba_gui/i18n/tr.json" beforeDir="false" afterPath="$PROJECT_DIR$/src/truba_gui/i18n/tr.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/truba_gui/ui/dialogs/help_dialog.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/truba_gui/ui/dialogs/help_dialog.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/truba_gui/ui/dialogs/quick_tour.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/truba_gui/ui/dialogs/quick_tour.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/truba_gui/ui/main_window.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/truba_gui/ui/main_window.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/truba_gui/ui/widgets/jobs_outputs_widget.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/truba_gui/ui/widgets/jobs_outputs_widget.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/truba_gui/ui/widgets/remote_dir_panel.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/truba_gui/ui/widgets/remote_dir_panel.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/waves/active/wave_001_agent_workflow_foundation.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/waves/pending/wave_000_context_and_agent_docs_foundation.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/waves/pending/wave_001_codex_architect_bootstrap.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/waves/pending/wave_002_runner_loop_foundation.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/waves/pending/wave_003_ollama_builder_integration.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/waves/pending/wave_004_ollama_tester_integration.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/waves/pending/wave_005_builder_tester_loop_completion.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/waves/pending/wave_006_task_safety_guardrails.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/waves/pending/wave_007_test_command_orchestration.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/waves/pending/wave_008_codex_architect_flow.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/waves/pending/wave_009_first_end_to_end_dry_run.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/waves/pending/wave_010_mcp_bridge_foundation.md" beforeDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -17,7 +45,7 @@
     <option name="LAST_RESOLUTION" value="IGNORE" />
   </component>
   <component name="EmbeddingIndexingInfo">
-    <option name="cachedIndexableFilesCount" value="6058" />
+    <option name="cachedIndexableFilesCount" value="928" />
   </component>
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
@@ -35,31 +63,31 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "ModuleVcsDetector.initialDetectionPerformed": "true",
-    "Python.__main__.executor": "Run",
-    "Python.clean_src_pycache (1).executor": "Run",
-    "Python.clean_src_pycache.executor": "Run",
-    "RunOnceActivity.MCP Project settings loaded": "true",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
-    "RunOnceActivity.git.unshallow": "true",
-    "com.intellij.ml.llm.matterhorn.ej.ui.settings.DefaultModelSelectionForGA.v1": "true",
-    "git-widget-placeholder": "codex/develop",
-    "ignore.virus.scanning.warn.message": "true",
-    "junie.onboarding.icon.badge.shown": "true",
-    "last_opened_file_path": "D:/Projeler/TrubaGUI/scripts",
-    "to.speed.mode.migration.done": "true"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
+    &quot;Python.__main__.executor&quot;: &quot;Run&quot;,
+    &quot;Python.clean_src_pycache (1).executor&quot;: &quot;Run&quot;,
+    &quot;Python.clean_src_pycache.executor&quot;: &quot;Run&quot;,
+    &quot;RunOnceActivity.MCP Project settings loaded&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;com.intellij.ml.llm.matterhorn.ej.ui.settings.DefaultModelSelectionForGA.v1&quot;: &quot;true&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;codex/develop&quot;,
+    &quot;ignore.virus.scanning.warn.message&quot;: &quot;true&quot;,
+    &quot;junie.onboarding.icon.badge.shown&quot;: &quot;true&quot;,
+    &quot;last_opened_file_path&quot;: &quot;D:/Projeler/TrubaGUI/scripts&quot;,
+    &quot;to.speed.mode.migration.done&quot;: &quot;true&quot;
   }
-}]]></component>
+}</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="D:\Projeler\TrubaGUI\scripts" />
       <recent name="D:\Projeler\TrubaGUI" />
     </key>
   </component>
-  <component name="RunManager" selected="Python.clean_src_pycache (1)">
+  <component name="RunManager" selected="Python.__main__">
     <configuration name="__main__" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="TrubaGUI" />
       <option name="ENV_FILES" value="" />
@@ -129,11 +157,35 @@
       <option name="INPUT_FILE" value="" />
       <method v="2" />
     </configuration>
+    <configuration name="runner" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="TrubaGUI" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/runner" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="RUN_TOOL" value="" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/runner/runner.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
     <recent_temporary>
       <list>
+        <item itemvalue="Python.__main__" />
+        <item itemvalue="Python.runner" />
         <item itemvalue="Python.clean_src_pycache (1)" />
         <item itemvalue="Python.clean_src_pycache" />
-        <item itemvalue="Python.__main__" />
       </list>
     </recent_temporary>
   </component>
@@ -152,7 +204,20 @@
       <option name="presentableId" value="Default" />
       <updated>1776604071386</updated>
     </task>
+    <task id="LOCAL-00001" summary="v1.0.0">
+      <option name="closed" value="true" />
+      <created>1778090033367</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1778090033367</updated>
+    </task>
+    <option name="localTasksCounter" value="2" />
     <servers />
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="v1.0.0" />
+    <option name="LAST_COMMIT_MESSAGE" value="v1.0.0" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

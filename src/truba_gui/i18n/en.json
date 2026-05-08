@@ -60,8 +60,15 @@
     "cmd_error": "Command error: {err}",
     "stderr": "STDERR:\n{data}",
     "save": "Save",
+    "add_connection": "Add Connection",
+    "connect_selected": "Connect Selected",
     "run_command": "Run",
     "console_title": "Console"
+  },
+  "settings": {
+    "action": "Settings",
+    "dialog_title": "Settings",
+    "save": "Save"
   },
   "common": {
     "ok": "OK",
@@ -248,11 +255,29 @@
     "dont_show_again": "Don't show again",
     "missing_help_text": "Help content could not be loaded.",
     "open_help": "Open Help",
-    "start_tour": "Start Tour",
     "library_label": "Library",
     "library_core": "Core Help",
     "library_truba": "TRUBA Playbook",
     "library_generic": "Generic Slurm/HPC"
+  },
+  "settings": {
+    "action": "Settings",
+    "dialog_title": "Settings",
+    "save": "Save",
+    "cancel": "Cancel",
+    "x11_autodeps_label": "When X11 is enabled, check/download/start required tools",
+    "x11_autodeps_tip": "On Connect, plink.exe and VcXsrv are checked. If missing, they will be downloaded (with your consent) and started.",
+    "close_vcxsrv_label": "Close VcXsrv when the app exits",
+    "close_vcxsrv_tip": "If VcXsrv was started by TrubaGUI, it will be closed by PID.",
+    "close_x11_procs_label": "Close X11/SSH processes on exit",
+    "close_x11_procs_tip": "plink/ssh QProcess instances started by TrubaGUI will be terminated."
+  },
+  "connection": {
+    "dialog_title": "Add Connection",
+    "save": "Save",
+    "save_and_connect": "Save & Connect",
+    "edit_dialog_title": "Edit Connection",
+    "edit_action": "Edit"
   },
   "tour": {
     "prev": "Back",

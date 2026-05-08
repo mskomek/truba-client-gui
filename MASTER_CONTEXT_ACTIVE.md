@@ -76,5 +76,7 @@ This repo now includes a Codex + Ollama workflow layer so that future work can b
 
 Current setup focus:
 - tailor the agent workflow files to the actual TRUBA GUI repo
+- keep Architect task definitions small, explicit, and parseable
 - prepare the repo for future wave-driven implementation
 - keep the next real engineering wave small and verifiable
+- add a read-only localhost MCP bridge for state and report inspection

@@ -29,9 +29,6 @@ class HelpDialog(QDialog):
         layout.addWidget(self.tabs, 1)
 
         bottom = QHBoxLayout()
-        self.btn_tour = QPushButton(t("help.start_tour"), self)
-        self.btn_tour.clicked.connect(self._start_tour)
-        bottom.addWidget(self.btn_tour, 0, Qt.AlignLeft)
         bottom.addStretch(1)
         btn = QPushButton(t("common.close"), self)
         btn.clicked.connect(self.accept)
@@ -52,12 +49,3 @@ class HelpDialog(QDialog):
                 browser.setMarkdown(md)
             else:
                 browser.setPlainText(t("help.missing_help_text"))
-
-    def _start_tour(self):
-        try:
-            p = self.parent()
-            if p is not None and hasattr(p, "start_quick_tour"):
-                p.start_quick_tour()
-            self.accept()
-        except Exception:
-            pass

@@ -11,6 +11,7 @@ from .widgets.directories_widget import DirectoriesWidget
 from .widgets.editor_widget import EditorWidget
 from .widgets.logs_widget import LogsWidget
 from .dialogs.help_dialog import HelpDialog
+from .dialogs.settings_dialog import SettingsDialog
 from .dialogs.quick_tour import QuickTourOverlay
 
 
@@ -131,16 +132,13 @@ class MainWindow(QMainWindow):
             pass
 
     def _init_language_menu(self):
-        """Top-right language selector + visible Help actions."""
+        """Top-right settings, help, and language controls."""
         menubar = self.menuBar()
 
         self._help_menu = menubar.addMenu(t("help.help_title"))
         self._act_help_center = QAction(t("help.open_help"), self)
-        self._act_help_tour = QAction(t("help.start_tour"), self)
         self._act_help_center.triggered.connect(self._open_help)
-        self._act_help_tour.triggered.connect(self.start_quick_tour)
         self._help_menu.addAction(self._act_help_center)
-        self._help_menu.addAction(self._act_help_tour)
 
         self._lang_menu = QMenu(self)
 
@@ -177,17 +175,19 @@ class MainWindow(QMainWindow):
         self._help_btn.setAutoRaise(False)
         self._help_btn.clicked.connect(self._open_help)
 
-        self._tour_btn = QToolButton(self)
-        self._tour_btn.setAutoRaise(False)
-        self._tour_btn.clicked.connect(self.start_quick_tour)
+        self._settings_btn = QToolButton(self)
+        self._settings_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self._settings_btn.setAutoRaise(False)
+        self._settings_btn.setMinimumWidth(88)
+        self._settings_btn.clicked.connect(self._open_settings)
 
         # Put the button into a container so it doesn't get clipped by the cornerWidget geometry.
         lang_container = QWidget(self)
         lang_container.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
         layout = QHBoxLayout(lang_container)
         layout.setContentsMargins(0, 0, 6, 0)
+        layout.addWidget(self._settings_btn)
         layout.addWidget(self._help_btn)
-        layout.addWidget(self._tour_btn)
         layout.addWidget(self._lang_btn)
         menubar.setCornerWidget(lang_container, Qt.TopRightCorner)
 
@@ -212,6 +212,13 @@ class MainWindow(QMainWindow):
     def _open_help(self):
         try:
             dlg = HelpDialog(self)
+            dlg.exec()
+        except Exception:
+            pass
+
+    def _open_settings(self):
+        try:
+            dlg = SettingsDialog(self)
             dlg.exec()
         except Exception:
             pass
@@ -246,14 +253,12 @@ class MainWindow(QMainWindow):
             self._help_menu.setTitle(t("help.help_title"))
         if hasattr(self, "_act_help_center"):
             self._act_help_center.setText(t("help.open_help"))
-        if hasattr(self, "_act_help_tour"):
-            self._act_help_tour.setText(t("help.start_tour"))
         if hasattr(self, "_help_btn"):
             self._help_btn.setText(t("help.help_title"))
             self._help_btn.setToolTip(t("help.open_help"))
-        if hasattr(self, "_tour_btn"):
-            self._tour_btn.setText(t("help.start_tour"))
-            self._tour_btn.setToolTip(t("help.start_tour"))
+        if hasattr(self, "_settings_btn"):
+            self._settings_btn.setText(t("settings.action"))
+            self._settings_btn.setToolTip(t("settings.dialog_title"))
         # Button shows currently selected language (with flag) and is wide enough
         if hasattr(self, "_lang_btn"):
             cur = getattr(self, "_current_lang", None)
@@ -340,7 +345,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         """Gracefully stop background helper processes on app exit.
 
-        Controlled by Login settings:
+        Controlled by app settings:
         - close_vcxsrv_on_exit
         - close_x11_procs_on_exit
         """

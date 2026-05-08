@@ -6,7 +6,6 @@ from typing import Callable, Optional
 from PySide6.QtCore import QEvent, QPoint, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath
 from PySide6.QtWidgets import (
-    QApplication,
     QCheckBox,
     QFrame,
     QHBoxLayout,
@@ -142,10 +141,6 @@ class QuickTourOverlay(QWidget):
         self._target = None
         self._target_rect = QRectF()
         step = self.steps[self.idx]
-        if step.tab_index is not None and step.tab_index >= 0:
-            self.main_window.tabs.setCurrentIndex(step.tab_index)
-            # Let Qt settle layouts after tab switch before mapping coordinates.
-            QApplication.processEvents()
         target = step.target_getter()
         if target is None or not target.isVisible():
             return

@@ -88,6 +88,7 @@ Do not claim success without recording what was checked.
 - do not mix release work with UI logic changes unless required
 - do not touch `third_party/` assets unless the task explicitly requires it
 - do not edit docs, tests, and source together unless the task truly needs all of them
+- read-only MCP bridge work must stay localhost-only and must not add write or shell execution paths
 
 ## Wave Discipline
 

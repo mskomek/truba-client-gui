@@ -36,7 +36,7 @@ Each wave should include:
 
 ## Good Wave Examples For This Repo
 
-- `wave_002_runner_ollama_loop.md`
+- `wave_002_runner_loop_foundation.md`
 - `wave_003_editor_submit_flow_hardening.md`
 - `wave_004_connection_diagnostics.md`
 - `wave_005_file_manager_reliability.md`

@@ -3,7 +3,7 @@ from __future__ import annotations
 from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QPushButton, QTextEdit,
-    QLineEdit, QLabel, QMessageBox
+    QLineEdit, QLabel, QMessageBox, QTabWidget
 )
 
 from truba_gui.core.i18n import t
@@ -14,16 +14,7 @@ from truba_gui.services.slurm_script_parser import parse_output_error, resolve_p
 
 
 class JobsOutputsWidget(QWidget):
-    
     request_show_directories = Signal()
-    """
-    Tek sayfada:
-      - Jobs list (squeue) + scancel
-      - /arf/scratch/<user> dosya listesi
-      - Slurm script çift tık -> #SBATCH --output / --error parse
-      - Altta 2 çıktı paneli: Output ve Error (salt-okunur, canlı takip)
-      - Sağ tuş: seçili dosyayı Çıktı-1 veya Çıktı-2'de aç ve izle
-    """
 
     def __init__(self):
         super().__init__()
@@ -34,8 +25,12 @@ class JobsOutputsWidget(QWidget):
         self.active_err: str = ""
         self._last_sig = [None, None]  # (size,mtime) for out/err
 
+        self.section_tabs = QTabWidget(self)
+        self.details_tab = QWidget(self.section_tabs)
+        self.outputs_tab = QWidget(self.section_tabs)
+
         # --- Jobs box
-        jobs_box = QGroupBox(t("jobs.title") if t("jobs.title") != "[jobs.title]" else "İşler")
+        self.jobs_box = QGroupBox(t("jobs.title") if t("jobs.title") != "[jobs.title]" else "İşler")
         self.jobs_text = QTextEdit()
         self.jobs_text.setReadOnly(True)
 
@@ -53,12 +48,12 @@ class JobsOutputsWidget(QWidget):
         row.addWidget(self.cancel_id)
         row.addWidget(self.btn_cancel)
 
-        vj = QVBoxLayout(jobs_box)
+        vj = QVBoxLayout(self.jobs_box)
         vj.addLayout(row)
         vj.addWidget(self.jobs_text)
 
         # --- Accounting / details box
-        meta_box = QGroupBox("Accounting & Details")
+        self.meta_box = QGroupBox("Accounting & Details")
         self.meta_text = QTextEdit()
         self.meta_text.setReadOnly(True)
         self.meta_text.setPlaceholderText("sacct / scontrol results")
@@ -73,7 +68,7 @@ class JobsOutputsWidget(QWidget):
         meta_row.addStretch(1)
         meta_row.addWidget(self.meta_job_id)
         meta_row.addWidget(self.btn_scontrol)
-        vm = QVBoxLayout(meta_box)
+        vm = QVBoxLayout(self.meta_box)
         vm.addLayout(meta_row)
         vm.addWidget(self.meta_text)
 
@@ -85,9 +80,15 @@ class JobsOutputsWidget(QWidget):
         self.scratch_panel.enable_output_menu = True
         self.scratch_panel.open_in_slot.connect(self.open_in_output_slot)
 
+        details_layout = QVBoxLayout(self.details_tab)
+        details_layout.addWidget(self.jobs_box)
+        details_layout.addWidget(self.meta_box)
+        details_layout.addWidget(self.scratch_panel, 2)
+
         # --- Outputs group (2 panels)
-        out_group = QGroupBox(t("jobs_outputs.outputs_title") if t("jobs_outputs.outputs_title") != "[jobs_outputs.outputs_title]" else "Çıktılar")
-        vg = QVBoxLayout(out_group)
+        self.out_group = QGroupBox(t("jobs_outputs.outputs_title") if t("jobs_outputs.outputs_title") != "[jobs_outputs.outputs_title]" else "Çıktılar")
+        outputs_layout = QVBoxLayout(self.outputs_tab)
+        vg = QVBoxLayout(self.out_group)
 
         self.lbl_script = QLabel(t("jobs_outputs.no_script") if t("jobs_outputs.no_script") != "[jobs_outputs.no_script]" else "Aktif Slurm Script: (yok)")
         vg.addWidget(self.lbl_script)
@@ -114,6 +115,8 @@ class JobsOutputsWidget(QWidget):
 
         vg.addWidget(b1)
         vg.addWidget(b2)
+        outputs_layout.addWidget(self.out_group)
+        outputs_layout.addStretch(1)
 
         # --- Live timer
         self._live_timer = QTimer(self)
@@ -122,10 +125,11 @@ class JobsOutputsWidget(QWidget):
 
         # --- main layout
         main = QVBoxLayout(self)
-        main.addWidget(jobs_box)
-        main.addWidget(meta_box)
-        main.addWidget(self.scratch_panel, 2)
-        main.addWidget(out_group, 3)
+        main.addWidget(self.section_tabs)
+        self.section_tabs.addTab(self.details_tab, "")
+        self.section_tabs.addTab(self.outputs_tab, "")
+        self.section_tabs.setCurrentIndex(0)
+        self.retranslate_ui()
 
     def set_session(self, session):
         self.session = session
@@ -224,6 +228,7 @@ class JobsOutputsWidget(QWidget):
         self.refresh_sacct()
         if script_path:
             self._activate_slurm_script(script_path)
+            self.section_tabs.setCurrentWidget(self.outputs_tab)
 
     # ---------------- File open behaviors
     def load_one_file(self, remote_path: str):
@@ -253,6 +258,7 @@ class JobsOutputsWidget(QWidget):
             self.path_err.setText(remote_path)
             self._last_sig[1] = None
             self.txt_err.setPlainText("")
+        self.section_tabs.setCurrentWidget(self.outputs_tab)
         self._live_timer.start()
         append_event({"type": "open_watch", "slot": slot+1, "path": remote_path})
 
@@ -286,6 +292,7 @@ class JobsOutputsWidget(QWidget):
         if err_path:
             self.open_in_output_slot(1, err_path)
 
+        self.section_tabs.setCurrentWidget(self.outputs_tab)
         append_event({"type": "activate_slurm", "script": script_path, "out": out_path, "err": err_path})
 
     # ---------------- Live polling
@@ -340,3 +347,17 @@ class JobsOutputsWidget(QWidget):
 
         if not self.active_out and not self.active_err:
             self._live_timer.stop()
+
+    def retranslate_ui(self):
+        details_title = f"{t('jobs.title')} / {t('common.details')}"
+        outputs_title = t("jobs_outputs.outputs_title") if t("jobs_outputs.outputs_title") != "[jobs_outputs.outputs_title]" else "Çıktılar"
+        self.section_tabs.setTabText(0, details_title)
+        self.section_tabs.setTabText(1, outputs_title)
+        self.jobs_box.setTitle(t("jobs.title") if t("jobs.title") != "[jobs.title]" else "İşler")
+        self.meta_box.setTitle("Accounting & Details")
+        self.out_group.setTitle(outputs_title)
+        self.lbl_script.setText(t("jobs_outputs.no_script") if t("jobs_outputs.no_script") != "[jobs_outputs.no_script]" else "Aktif Slurm Script: (yok)")
+        self.btn_refresh.setText(t("jobs.refresh") if t("jobs.refresh") != "[jobs.refresh]" else "Yenile")
+        self.btn_cancel.setText(t("jobs.cancel") if t("jobs.cancel") != "[jobs.cancel]" else "İşi İptal Et")
+        self.btn_sacct.setText("Refresh sacct")
+        self.btn_scontrol.setText("Show job details")
