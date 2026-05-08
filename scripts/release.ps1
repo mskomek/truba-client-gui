@@ -22,31 +22,34 @@ if (-not (Test-Path $distDir)) {
     throw "Expected ONEDIR output not found: $distDir"
 }
 
-# Put a simple changelog directly next to the EXE for end-users.
 $changelogSrc = Join-Path $Root "src/truba_gui/docs/CHANGELOG.md"
-$changelogOut = Join-Path $distDir "CHANGELOG.txt"
-if (Test-Path $changelogSrc) {
-    (Get-Content $changelogSrc -Raw) | Set-Content -Path $changelogOut -Encoding utf8
-} else {
-    @"
-Changelog
-=========
-
-v$Version
-- Build generated.
-"@ | Set-Content -Path $changelogOut -Encoding utf8
+if (-not (Test-Path $changelogSrc)) {
+    throw "Expected changelog source not found: $changelogSrc"
 }
 
-$zipName = "truba-client-gui_v$Version`_windows_onedir.zip"
-$zipPath = Join-Path $Root "dist/$zipName"
-if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+$distChangelogPath = Join-Path $distDir "CHANGELOG.txt"
+Copy-Item -Path $changelogSrc -Destination $distChangelogPath -Force
 
-Compress-Archive -Path "$distDir/*" -DestinationPath $zipPath -Force
+$releaseChangelogName = "CHANGELOG_v$Version.md"
+$releaseChangelogPath = Join-Path $Root "dist/$releaseChangelogName"
+Copy-Item -Path $changelogSrc -Destination $releaseChangelogPath -Force
 
-$shaPath = "$zipPath.sha256"
-$hash = Get-FileHash $zipPath -Algorithm SHA256
-"$($hash.Hash)  $zipName" | Set-Content -Path $shaPath -Encoding ascii
+$releaseExeName = "truba-client-gui_v$Version`_windows.exe"
+$releaseExePath = Join-Path $Root "dist/$releaseExeName"
+Copy-Item -Path (Join-Path $distDir "truba-client-gui.exe") -Destination $releaseExePath -Force
+
+$releaseZipName = "truba-client-gui_v$Version`_windows_onedir.zip"
+$releaseZipPath = Join-Path $Root "dist/$releaseZipName"
+if (Test-Path $releaseZipPath) { Remove-Item $releaseZipPath -Force }
+
+Compress-Archive -Path "$distDir/*" -DestinationPath $releaseZipPath -Force
+
+$releaseShaPath = "$releaseZipPath.sha256"
+$hash = Get-FileHash $releaseZipPath -Algorithm SHA256
+"$($hash.Hash)  $releaseZipName" | Set-Content -Path $releaseShaPath -Encoding ascii
 
 Write-Host "Release artifacts:"
-Write-Host " - $zipPath"
-Write-Host " - $shaPath"
+Write-Host " - $releaseChangelogPath"
+Write-Host " - $releaseExePath"
+Write-Host " - $releaseZipPath"
+Write-Host " - $releaseShaPath"
