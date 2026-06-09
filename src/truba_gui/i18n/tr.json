@@ -63,7 +63,12 @@
     "add_connection": "Bağlantı Ekle",
     "connect_selected": "Seçiliyi Bağla",
     "run_command": "Çalıştır",
-    "console_title": "Konsol"
+    "console_title": "Konsol",
+    "reconnect_prompt_title": "Yeniden bağlanılsın mı?",
+    "reconnect_prompt_message": "SSH oturumu beklenmedik şekilde kapandı. Yeniden bağlanmak ister misiniz?",
+    "reconnect_notice": "SSH bağlantısı koptu: {reason}\nYeniden bağlanmak için r yazıp Enter'a basın veya Evet'i seçin.",
+    "reconnect_started": "Yeniden bağlanılıyor...",
+    "reconnect_placeholder": "Bağlantı yok: yeniden bağlanmak için r yazıp Enter'a basın"
   },
   "settings": {
     "action": "Ayarlar",
@@ -172,6 +177,9 @@
     "edit": "Düzelt",
     "save_as": "Farklı Kaydet",
     "upload": "Yükle",
+    "template_upload": "Şablon Yükle",
+    "template_extract_iso": "extract_iso.py",
+    "template_missing": "Şablon dosyası bulunamadı: {path}",
     "download_selected": "Seçilenleri İndir",
     "current": "Dizin",
     "tab_slurm": "Slurm",
@@ -185,11 +193,20 @@
     "template_mpi": "MPI template",
     "new_slurm_name_title": "Yeni Slurm Script",
     "new_slurm_name_label": "Dosya adi:",
-    "new_slurm_exists": "Dosya zaten var. Editor'de uzerine yazilsin mi?"
+    "new_slurm_exists": "Dosya zaten var. Editor'de uzerine yazilsin mi?",
+    "submit_sbatch": "sbatch ile gönder",
+    "submit_success": "sbatch ile gönderildi. İş kimliği: {jobid}",
+    "submit_failed": "sbatch gönderimi başarısız: {err}\nBağlantıyı ve Slurm betiği yönergelerini kontrol edin.",
+    "submit_failed_no_job_id": "Gönderim geçerli bir iş kimliği döndürmedi. Betiği ve Slurm yanıtını kontrol edin."
   },
   "jobs_outputs": {
     "scratch_title": "Scratch (/arf/scratch)",
+    "files_title": "Dosyalar",
     "outputs_title": "Çıktılar",
+    "lssrv_title": "TRUBA Sunucuları (lssrv)",
+    "lssrv_refresh": "lssrv Yenile",
+    "lssrv_empty": "lssrv çıktı döndürmedi.",
+    "lssrv_failed": "lssrv yenilemesi başarısız oldu.",
     "output": "Çıktı",
     "file": "Dosya",
     "no_script": "Aktif Slurm Script: (yok)",
@@ -264,6 +281,12 @@
     "action": "Ayarlar",
     "dialog_title": "Ayarlar",
     "save": "Kaydet",
+    "jobs_outputs_refresh_interval_label": "İşler & Çıktılar yenileme aralığı (saniye)",
+    "jobs_outputs_refresh_interval_tip": "İşler & Çıktılar için canlı yenileme aralığı; manuel yenileme ayrı çalışır.",
+    "lssrv_auto_refresh_label": "lssrv'yi İşlerle birlikte otomatik yenile",
+    "lssrv_auto_refresh_tip": "İşaretliyken bağlantı açık olduğu sürece lssrv, İşler & Çıktılar aralığında yenilenir.",
+    "transfer_parallelism_label": "Paralel transfer sayısı",
+    "transfer_parallelism_tip": "Aynı anda aktif tutulacak en fazla transfer işi sayısı.",
     "cancel": "İptal",
     "x11_autodeps_label": "X11 seçiliyken gerekli programları kontrol et/indir/başlat",
     "x11_autodeps_tip": "Bağlan'a basınca plink.exe ve VcXsrv kontrol edilir. Yoksa kullanıcının onayıyla indirilir ve başlatılır.",
@@ -271,6 +294,17 @@
     "close_vcxsrv_tip": "TrubaGUI tarafından başlatılan VcXsrv varsa PID ile kapatılır.",
     "close_x11_procs_label": "Program kapanınca X11/SSH süreçlerini kapat",
     "close_x11_procs_tip": "TrubaGUI'nin başlattığı plink/ssh QProcess'leri sonlandırılır."
+  },
+  "transfer": {
+    "queue_tab": "Kuyruk",
+    "errors_tab": "Hatalar",
+    "completed_tab": "Tamamlanan",
+    "stop": "Durdur",
+    "cancel": "İptal",
+    "retry_failed": "Başarısızları yeniden dene",
+    "retry_selected": "Seçileni yeniden dene",
+    "parallel_hint": "Ayarlandı: paralel transfer limiti {limit}",
+    "status": "Kuyruk: {pending} | Hata: {errors} | Tamamlanan: {completed}"
   },
   "connection": {
     "dialog_title": "Bağlantı Ekle",

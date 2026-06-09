@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal, Slot
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSplitter, QMessageBox,
     QDialog, QPushButton, QFileDialog, QInputDialog
@@ -15,18 +16,44 @@ from truba_gui.core.history import append_event
 from truba_gui.ui.widgets.remote_dir_panel import RemoteDirPanel
 
 
+class _SubmitSignals(QObject):
+    finished = Signal(object, str, str)  # worker, script path, sbatch output
+    failed = Signal(object, str, str)  # worker, script path, error
+
+
+class _SubmitWorker(QRunnable):
+    def __init__(self, slurm, script_path: str):
+        super().__init__()
+        self._slurm = slurm
+        self._script_path = script_path
+        self.signals = _SubmitSignals()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            output = self._slurm.sbatch(self._script_path)
+        except Exception as exc:
+            self.signals.failed.emit(self, self._script_path, str(exc))
+            return
+        self.signals.finished.emit(self, self._script_path, output or "")
+
+
 class DirectoriesWidget(QWidget):
     open_in_editor = Signal(str, str)  # path, content
+    script_submitted = Signal(str, str)  # job_id, script_path
 
     def __init__(self):
         super().__init__()
         self.session = None
+        self._submit_workers: set[_SubmitWorker] = set()
 
         self.panel_scratch = RemoteDirPanel(title="/arf/scratch")
         self.panel_home = RemoteDirPanel(title="/arf/home")
 
         self.panel_scratch.open_file.connect(self.on_open_file)
         self.panel_home.open_file.connect(self.on_open_file)
+        self.panel_scratch.submit_requested.connect(self.submit_script)
+        self.panel_home.submit_requested.connect(self.submit_script)
 
         splitter = QSplitter()
         splitter.addWidget(self.panel_scratch)
@@ -62,6 +89,92 @@ class DirectoriesWidget(QWidget):
         self.btn_new_slurm.setText(
             t("dirs.new_slurm_edit") if t("dirs.new_slurm_edit") != "[dirs.new_slurm_edit]" else "Create/Edit ARF Slurm"
         )
+
+    def submit_script(self, script_path: str) -> None:
+        slurm = (self.session or {}).get("slurm")
+        if not slurm:
+            QMessageBox.warning(self, t("common.error"), t("common.no_connection"))
+            append_event(
+                {
+                    "type": "directories_submit",
+                    "path": script_path,
+                    "status": "failed",
+                    "error": "no Slurm session",
+                }
+            )
+            return
+
+        worker = _SubmitWorker(slurm, script_path)
+        self._submit_workers.add(worker)
+        worker.signals.finished.connect(self._on_submit_finished)
+        worker.signals.failed.connect(self._on_submit_failed)
+        QThreadPool.globalInstance().start(worker)
+
+    @Slot(object, str, str)
+    def _on_submit_finished(self, worker: _SubmitWorker, script_path: str, output: str) -> None:
+        self._submit_workers.discard(worker)
+        job_id = self._extract_job_id(output)
+        if not job_id:
+            append_event(
+                {
+                    "type": "directories_submit",
+                    "path": script_path,
+                    "status": "failed",
+                    "result": output,
+                    "error": "no valid job ID",
+                }
+            )
+            message = t("dirs.submit_failed_no_job_id")
+            if message == "[dirs.submit_failed_no_job_id]":
+                message = "Submission returned no valid job ID. Check the script and Slurm response."
+            if output:
+                message += f"\n\n{output}"
+            QMessageBox.critical(self, t("common.error"), message)
+            return
+
+        append_event(
+            {
+                "type": "directories_submit",
+                "path": script_path,
+                "status": "success",
+                "jobid": job_id,
+                "result": output,
+            }
+        )
+        self.script_submitted.emit(job_id, script_path)
+        message = t("dirs.submit_success")
+        if message == "[dirs.submit_success]":
+            message = "Submitted with sbatch. Job ID: {jobid}"
+        QMessageBox.information(
+            self,
+            t("common.info"),
+            message.format(jobid=job_id) + (f"\n\n{output}" if output else ""),
+        )
+
+    @Slot(object, str, str)
+    def _on_submit_failed(self, worker: _SubmitWorker, script_path: str, error: str) -> None:
+        self._submit_workers.discard(worker)
+        append_event(
+            {
+                "type": "directories_submit",
+                "path": script_path,
+                "status": "failed",
+                "error": error,
+            }
+        )
+        message = t("dirs.submit_failed")
+        if message == "[dirs.submit_failed]":
+            message = "sbatch submission failed: {err}\nCheck the connection and Slurm script directives."
+        QMessageBox.critical(self, t("common.error"), message.format(err=error))
+
+    @staticmethod
+    def _extract_job_id(sbatch_output: str) -> str:
+        match = re.search(
+            r"Submitted batch job\s+(\d+)",
+            sbatch_output or "",
+            flags=re.IGNORECASE,
+        )
+        return match.group(1) if match else ""
 
     def create_slurm_from_template(self):
         if not self.session or not self.session.get("connected"):

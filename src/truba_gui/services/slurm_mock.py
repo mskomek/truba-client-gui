@@ -26,3 +26,10 @@ class MockSlurmBackend(SlurmBackend):
             f"JobId={job_id} JobName=mock_job UserId=mock(1000) "
             "JobState=RUNNING Partition=short Nodes=1"
         )
+
+    def lssrv(self) -> str:
+        return (
+            "SERVER     STATE     CPU  MEMORY\n"
+            "node001    available  32   128G\n"
+            "node002    busy       64   256G\n"
+        )

@@ -53,6 +53,65 @@ def update_settings(patch: Dict[str, Any]) -> Dict[str, Any]:
     return st
 
 
+def _coerce_positive_int(value: Any, default: int) -> int:
+    try:
+        coerced = int(value)
+    except Exception:
+        return default
+    return coerced if coerced > 0 else default
+
+
+def _coerce_int_in_range(value: Any, default: int, minimum: int, maximum: int) -> int:
+    try:
+        coerced = int(value)
+    except Exception:
+        return default
+    if coerced < minimum:
+        return minimum
+    if coerced > maximum:
+        return maximum
+    return coerced
+
+
+def get_jobs_outputs_refresh_interval_seconds(default: int = 15) -> int:
+    """Return the live Jobs & Outputs polling interval in seconds."""
+    st = load_settings()
+    return _coerce_positive_int(st.get("jobs_outputs_refresh_interval_seconds", default), default)
+
+
+def set_jobs_outputs_refresh_interval_seconds(seconds: int) -> int:
+    """Persist the live Jobs & Outputs polling interval in seconds."""
+    value = _coerce_positive_int(seconds, 15)
+    update_settings({"jobs_outputs_refresh_interval_seconds": value})
+    return value
+
+
+def get_lssrv_auto_refresh_enabled(default: bool = False) -> bool:
+    """Return whether lssrv should refresh with the Jobs polling timer."""
+    value = load_settings().get("lssrv_auto_refresh_enabled", default)
+    return value if isinstance(value, bool) else default
+
+
+def set_lssrv_auto_refresh_enabled(enabled: bool) -> bool:
+    """Persist whether lssrv should refresh with the Jobs polling timer."""
+    value = bool(enabled)
+    update_settings({"lssrv_auto_refresh_enabled": value})
+    return value
+
+
+def get_transfer_parallelism(default: int = 1) -> int:
+    """Return the configured transfer queue parallelism, capped at 10."""
+    st = load_settings()
+    return _coerce_int_in_range(st.get("transfer_parallelism", default), default, 1, 10)
+
+
+def set_transfer_parallelism(count: int) -> int:
+    """Persist the transfer queue parallelism, capped at 10."""
+    value = _coerce_int_in_range(count, 1, 1, 10)
+    update_settings({"transfer_parallelism": value})
+    return value
+
+
 def save_config(cfg: Dict[str, Any]) -> None:
     p = _config_path()
     p.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")

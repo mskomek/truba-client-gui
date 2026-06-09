@@ -63,12 +63,19 @@
     "add_connection": "Add Connection",
     "connect_selected": "Connect Selected",
     "run_command": "Run",
-    "console_title": "Console"
+    "console_title": "Console",
+    "reconnect_prompt_title": "Reconnect?",
+    "reconnect_prompt_message": "The SSH session ended unexpectedly. Do you want to reconnect?",
+    "reconnect_notice": "SSH connection dropped: {reason}\nPress r or choose Yes to reconnect.",
+    "reconnect_started": "Reconnecting...",
+    "reconnect_placeholder": "Disconnected: type r and press Enter to reconnect"
   },
   "settings": {
     "action": "Settings",
     "dialog_title": "Settings",
-    "save": "Save"
+    "save": "Save",
+    "jobs_outputs_refresh_interval_label": "Jobs & Outputs refresh interval (seconds)",
+    "jobs_outputs_refresh_interval_tip": "Live polling interval for Jobs & Outputs; manual refresh stays separate."
   },
   "common": {
     "ok": "OK",
@@ -172,6 +179,9 @@
     "edit": "Edit",
     "save_as": "Save as",
     "upload": "Upload",
+    "template_upload": "Template Upload",
+    "template_extract_iso": "extract_iso.py",
+    "template_missing": "Template file not found: {path}",
     "download_selected": "Download selected",
     "current": "Directory",
     "tab_slurm": "Slurm",
@@ -185,11 +195,20 @@
     "template_mpi": "MPI template",
     "new_slurm_name_title": "New Slurm Script",
     "new_slurm_name_label": "File name:",
-    "new_slurm_exists": "File already exists. Overwrite in editor?"
+    "new_slurm_exists": "File already exists. Overwrite in editor?",
+    "submit_sbatch": "Submit with sbatch",
+    "submit_success": "Submitted with sbatch. Job ID: {jobid}",
+    "submit_failed": "sbatch submission failed: {err}\nCheck the connection and Slurm script directives.",
+    "submit_failed_no_job_id": "Submission returned no valid job ID. Check the script and Slurm response."
   },
   "jobs_outputs": {
     "scratch_title": "Scratch (/arf/scratch)",
+    "files_title": "Files",
     "outputs_title": "Outputs",
+    "lssrv_title": "TRUBA Servers (lssrv)",
+    "lssrv_refresh": "Refresh lssrv",
+    "lssrv_empty": "lssrv returned no output.",
+    "lssrv_failed": "lssrv refresh failed.",
     "output": "Output",
     "file": "File",
     "no_script": "Active Slurm script: (none)",
@@ -264,6 +283,12 @@
     "action": "Settings",
     "dialog_title": "Settings",
     "save": "Save",
+    "jobs_outputs_refresh_interval_label": "Jobs & Outputs refresh interval (seconds)",
+    "jobs_outputs_refresh_interval_tip": "Live polling interval for Jobs & Outputs; manual refresh stays separate.",
+    "lssrv_auto_refresh_label": "Automatically refresh lssrv with Jobs",
+    "lssrv_auto_refresh_tip": "When enabled, lssrv refreshes at the Jobs & Outputs interval while connected.",
+    "transfer_parallelism_label": "Parallel transfer count",
+    "transfer_parallelism_tip": "Maximum number of concurrent transfer jobs to keep active.",
     "cancel": "Cancel",
     "x11_autodeps_label": "When X11 is enabled, check/download/start required tools",
     "x11_autodeps_tip": "On Connect, plink.exe and VcXsrv are checked. If missing, they will be downloaded (with your consent) and started.",
@@ -271,6 +296,17 @@
     "close_vcxsrv_tip": "If VcXsrv was started by TrubaGUI, it will be closed by PID.",
     "close_x11_procs_label": "Close X11/SSH processes on exit",
     "close_x11_procs_tip": "plink/ssh QProcess instances started by TrubaGUI will be terminated."
+  },
+  "transfer": {
+    "queue_tab": "Queue",
+    "errors_tab": "Errors",
+    "completed_tab": "Completed",
+    "stop": "Stop",
+    "cancel": "Cancel",
+    "retry_failed": "Retry failed",
+    "retry_selected": "Retry selected",
+    "parallel_hint": "Configured parallel transfer limit: {limit}",
+    "status": "Queued: {pending} | Errors: {errors} | Completed: {completed}"
   },
   "connection": {
     "dialog_title": "Add Connection",

@@ -3,6 +3,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QLineEdit
 
+from truba_gui.core.i18n import t
 from truba_gui.services.command_history_store import get_global_history_store
 
 
@@ -17,18 +18,32 @@ class TerminalInput(QLineEdit):
     """
 
     command_submitted = Signal(str)
+    reconnect_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         # Shared history store (single backing file) + per-widget navigation cursor.
         self.history = get_global_history_store()
         self._hist_index = len(self.history.items)
-        self.setPlaceholderText("Komut gir (↑/↓ geçmiş, Enter çalıştır)")
+        self._connected = True
+        self.set_connected(True)
         self.setClearButtonEnabled(True)
+
+    def set_connected(self, connected: bool) -> None:
+        self._connected = bool(connected)
+        if self._connected:
+            self.setPlaceholderText(t("login.command_placeholder"))
+        else:
+            self.setPlaceholderText(t("login.reconnect_placeholder"))
 
     def submit_current(self) -> None:
         cmd = (self.text() or "").strip()
         if not cmd:
+            return
+        if not self._connected:
+            if cmd.lower() == "r":
+                self.clear()
+                self.reconnect_requested.emit()
             return
         self.history.add(cmd)
         # Reset navigation cursor after adding.
@@ -52,6 +67,9 @@ class TerminalInput(QLineEdit):
 
     def keyPressEvent(self, event):
         k = event.key()
+        if not self._connected and k in (Qt.Key_Return, Qt.Key_Enter):
+            self.submit_current()
+            return
         if k == Qt.Key_Up:
             self.setText(self._history_prev())
             self.end(False)

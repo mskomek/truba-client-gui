@@ -2,10 +2,15 @@
 
 ## v1.1.0
 - Connection: removed Start Tour from the normal flow and added a dedicated Add Connection dialog plus a Settings dialog for app-level options.
+- Saved profiles: added direct connection on double-click and a Connect action to the context menu.
 - Connection console: improved login output, prompt rendering, PTY resize handling, and interactive shell routing.
 - Terminal rendering: added ANSI/VT emulation so redraw, cursor movement, box drawing, and dialog-style screens render more correctly.
 - Navigation: fixed saved session context editing, prevented unwanted auto-switching back to the Connection tab, and improved directory double-click plus parent-folder navigation.
-- Jobs: split the Jobs area into clearer sub-tabs for accounting/details and outputs.
+- Jobs: split the Jobs area into clearer Job Details, Files, and Outputs sub-tabs.
+- Jobs refresh: added a configurable refresh interval with a 15-second default and an optional persisted setting to refresh `lssrv` on the same timer.
+- TRUBA status: added refreshable `lssrv` output with terminal-style rendering in Job Details.
+- Slurm submission: added a translated Directories context-menu action for remote `.slurm` and `.sbatch` files.
+- Slurm submission: changed SSH-backed `sbatch` execution to run from the remote script's parent directory.
 - Localization: fixed Turkish i18n encoding issues so translated strings render correctly.
 - X11 and logs: improved X server startup checks, download flow, logging, and shutdown safety.
 

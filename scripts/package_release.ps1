@@ -59,6 +59,9 @@ if (Test-Path $versionDir) {
 New-Item -ItemType Directory -Path $versionDir -Force | Out-Null
 
 Copy-Item -Path (Join-Path $distDir "*") -Destination $versionDir -Recurse -Force
+if (Test-Path (Join-Path $Root "templates")) {
+    Copy-Item -Path (Join-Path $Root "templates") -Destination $versionDir -Recurse -Force
+}
 
 $exePath = Join-Path $versionDir "truba-client-gui.exe"
 if (-not (Test-Path $exePath)) {

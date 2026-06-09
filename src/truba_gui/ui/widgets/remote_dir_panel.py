@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from PySide6.QtCore import QEvent, QPoint, Qt, Signal, QObject, QThread, Slot
@@ -14,6 +15,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
     QCheckBox,
+    QDialog,
     QGroupBox,
     QListWidget,
     QProgressDialog,
@@ -35,8 +37,10 @@ from PySide6.QtWidgets import (
 
 from truba_gui.core.i18n import t
 from truba_gui.core.ui_errors import show_exception
+from truba_gui.config.storage import get_transfer_parallelism
 from truba_gui.services.file_clipboard import get_file_clipboard
 from truba_gui.services.files_base import RemoteEntry
+from truba_gui.ui.dialogs.transfer_dialog import TransferDialog, TransferItem
 
 
 def _fmt_size(n: int) -> str:
@@ -282,6 +286,7 @@ class _RemoteTree(QTreeWidget):
 class RemoteDirPanel(QWidget):
     open_file = Signal(str)  # remote path (file double click)
     open_in_slot = Signal(int, str)  # slot_index(0/1), remote path
+    submit_requested = Signal(str)  # remote Slurm script path
 
     # registry to refresh source/target panels on move
     _instances: Dict[str, "RemoteDirPanel"] = {}
@@ -305,6 +310,11 @@ class RemoteDirPanel(QWidget):
 
         self.btn_upload = QPushButton(t("dirs.upload") if t("dirs.upload") != "[dirs.upload]" else "Yükle")
         self.btn_upload.clicked.connect(self.upload_files)
+
+        self.btn_template_upload = QPushButton(
+            t("dirs.template_upload") if t("dirs.template_upload") != "[dirs.template_upload]" else "Template Upload"
+        )
+        self.btn_template_upload.clicked.connect(self.show_template_upload_menu)
 
         self.btn_download = QPushButton(
             t("dirs.download_selected") if t("dirs.download_selected") != "[dirs.download_selected]" else "Seçilenleri İndir"
@@ -331,6 +341,7 @@ class RemoteDirPanel(QWidget):
         top.addWidget(self.lbl)
         top.addStretch(1)
         top.addWidget(self.btn_upload)
+        top.addWidget(self.btn_template_upload)
         top.addWidget(self.btn_download)
         top.addWidget(self.btn_delete)
         top.addWidget(self.btn_undo)
@@ -444,6 +455,8 @@ class RemoteDirPanel(QWidget):
         has_parent = bool(self._remote_parent_dir(self.current_dir)) if has_session else False
         if hasattr(self, "btn_parent"):
             self.btn_parent.setEnabled(has_parent)
+        if hasattr(self, "btn_template_upload"):
+            self.btn_template_upload.setEnabled(bool(has_session and self.current_dir))
 
     def _handle_item_double_clicked(self, item, col):
         path = str(item.data(0, Qt.ItemDataRole.UserRole) or "")
@@ -545,6 +558,25 @@ class RemoteDirPanel(QWidget):
             if p:
                 paths.append(str(p))
         return paths
+
+    def _selected_entries_from_view(self, view: QTreeWidget) -> List[Tuple[str, bool]]:
+        entries: List[Tuple[str, bool]] = []
+        for it in view.selectedItems():
+            if bool(it.data(0, Qt.ItemDataRole.UserRole + 2)):
+                continue
+            path = str(it.data(0, Qt.ItemDataRole.UserRole) or "")
+            if path:
+                entries.append((path, bool(it.data(0, Qt.ItemDataRole.UserRole + 1))))
+        return entries
+
+    @staticmethod
+    def _submit_candidate(entries: List[Tuple[str, bool]]) -> str:
+        if len(entries) != 1:
+            return ""
+        path, is_dir = entries[0]
+        if is_dir or not path.lower().endswith((".slurm", ".sbatch")):
+            return ""
+        return path
 
     def selected_paths(self, tab_key: str = "all") -> List[str]:
         view = self.views.get(tab_key, self.views["all"])
@@ -658,9 +690,12 @@ class RemoteDirPanel(QWidget):
                 clicked_path = str(item.data(0, Qt.ItemDataRole.UserRole) or "")
                 clicked_is_dir = bool(item.data(0, Qt.ItemDataRole.UserRole + 1))
 
-        sel_paths = self._selected_paths_from_view(view)
-        if not sel_paths and clicked_path:
-            sel_paths = [clicked_path]
+        selected_items = view.selectedItems()
+        selected_entries = self._selected_entries_from_view(view)
+        if not selected_items and clicked_path:
+            selected_entries = [(clicked_path, clicked_is_dir)]
+        sel_paths = [path for path, _is_dir in selected_entries]
+        submit_path = self._submit_candidate(selected_entries) if len(selected_items) <= 1 else ""
 
         menu = QMenu(self)
 
@@ -702,8 +737,16 @@ class RemoteDirPanel(QWidget):
             # Remote -> Local paste (download to a chosen local folder)
             act_paste_to_local = menu.addAction("Yerel'e Yapıştır")
             menu.addSeparator()
+        act_submit = None
         act_edit = act_download = act_rename = act_copy = act_move = act_delete = None
         if sel_paths:
+            if submit_path:
+                act_submit = menu.addAction(
+                    t("dirs.submit_sbatch")
+                    if t("dirs.submit_sbatch") != "[dirs.submit_sbatch]"
+                    else "Submit with sbatch"
+                )
+                menu.addSeparator()
             act_edit = menu.addAction(t("dirs.edit") if t("dirs.edit") != "[dirs.edit]" else "Düzenle")
             act_download = menu.addAction(t("dirs.download") if t("dirs.download") != "[dirs.download]" else "İndir")
             menu.addSeparator()
@@ -755,6 +798,10 @@ class RemoteDirPanel(QWidget):
             return
 
         if not sel_paths:
+            return
+
+        if act_submit is not None and chosen == act_submit:
+            self.submit_requested.emit(submit_path)
             return
 
         # Edit
@@ -967,87 +1014,59 @@ class RemoteDirPanel(QWidget):
             return False
         if not plan:
             return True
-
-        # Show batch queue view
-        self._queue_set(plan)
-
-        dlg = QProgressDialog(title, "İptal", 0, len(plan), self)
-        dlg.setWindowModality(Qt.WindowModality.ApplicationModal)
-        dlg.setMinimumDuration(0)
-        dlg.setAutoClose(True)
-        dlg.setAutoReset(True)
-        dlg.setValue(0)
-
-        # Track active batch for graceful shutdown.
+        transfer_items = [TransferItem(op=p.op, src=p.src, dst=p.dst, recursive=p.recursive) for p in plan]
+        dlg = TransferDialog(
+            self,
+            title=title,
+            items=transfer_items,
+            run_item=self._execute_transfer_item,
+            parallel_limit=get_transfer_parallelism(),
+        )
         self._active_plan = list(plan)
         self._active_step = 0
         self._active_title = title
-
-        thread = QThread(self)
-        worker = _FileOpWorker(self.session["files"], plan)
-        self._active_thread = thread
-        self._active_worker = worker
-        worker.moveToThread(thread)
-
-        state = {"cancelled": False, "error": ""}
-
-        def on_progress(step: int, label: str) -> None:
-            # step is 1-based, emitted before executing the step.
-            self._active_step = int(step)
-            dlg.setLabelText(label)
-            dlg.setValue(step)
-            self._queue_progress(step, label)
-            self._journal_transfer("step", title=title, step=int(step), label=label)
-            QApplication.processEvents()
-
-        def on_finished(cancelled: bool, msg: str) -> None:
-            state["cancelled"] = bool(cancelled)
-            state["error"] = msg or ""
-            dlg.setValue(len(plan))
-            dlg.close()
-            # Clear queue view when the batch stops (success/cancel/error)
-            self._queue_clear()
-
-            # If cancelled during shutdown, persist remaining plan for diagnostics.
-            try:
-                if state["cancelled"] and self._active_plan:
-                    remaining = self._active_plan[max(0, self._active_step - 1):]
-                    if remaining:
-                        self._persist_batch_state(remaining, title=self._active_title)
-                        self._journal_transfer("cancelled", title=title, remaining=len(remaining))
-                elif state["error"]:
-                    self._journal_transfer("error", title=title, error=state["error"])
-                else:
-                    self._journal_transfer("completed", title=title, total=len(plan))
-            except Exception:
-                pass
-
-            # Clear active refs
-            self._active_thread = None
-            self._active_worker = None
+        dlg.start()
+        result = dlg.exec()
+        try:
+            if dlg.finished_cleanly():
+                return True
+            if result == QDialog.DialogCode.Rejected:
+                return False
+            return False
+        finally:
             self._active_plan = []
             self._active_step = 0
             self._active_title = ""
-            thread.quit()
 
-        dlg.canceled.connect(worker.cancel)
-        worker.progress.connect(on_progress)
-        worker.finished.connect(on_finished)
-        thread.started.connect(worker.run)
-        thread.finished.connect(thread.deleteLater)
-        thread.start()
-
-        dlg.exec()
-
-        thread.quit()
-        thread.wait(3000)
-
-        if state["error"]:
-            self._show_op_error(state["error"])
-            return False
-        if state["cancelled"]:
-            return False
-        return True
+    def _execute_transfer_item(self, item: TransferItem) -> None:
+        if not self.session or not self.session.get("files"):
+            raise RuntimeError(t("common.no_connection"))
+        files = self.session["files"]
+        op = item.op
+        if op == "delete":
+            files.remove(item.dst, recursive=item.recursive)
+        elif op == "copy":
+            files.copy(item.src, item.dst, recursive=item.recursive)
+        elif op == "move":
+            files.move(item.src, item.dst)
+        elif op == "upload":
+            files.upload(item.src, item.dst)
+        elif op == "download":
+            files.download(item.src, item.dst)
+        elif op == "mkdir_remote":
+            files.mkdir(item.dst)
+        elif op == "mkdir_local":
+            os.makedirs(item.dst, exist_ok=True)
+        elif op == "delete_local":
+            if os.path.isdir(item.dst):
+                shutil.rmtree(item.dst, ignore_errors=True)
+            else:
+                try:
+                    os.remove(item.dst)
+                except FileNotFoundError:
+                    pass
+        else:
+            raise RuntimeError(f"Unknown op: {op}")
 
     def shutdown(self) -> None:
         """Cancel any in-flight batch operation (best-effort).
@@ -1439,6 +1458,44 @@ class RemoteDirPanel(QWidget):
             self.refresh()
         return ok
 
+    def _template_upload_path(self) -> Path:
+        return Path(__file__).resolve().parents[4] / "templates" / "extract_iso.py"
+
+    def show_template_upload_menu(self) -> None:
+        if not self.session or not self.session.get("files"):
+            QMessageBox.warning(self, t("common.error"), t("common.no_connection"))
+            return
+        if not self.current_dir:
+            QMessageBox.warning(self, t("common.error"), "Dizin seçili değil.")
+            return
+
+        menu = QMenu(self)
+        act_extract_iso = menu.addAction(
+            t("dirs.template_extract_iso") if t("dirs.template_extract_iso") != "[dirs.template_extract_iso]" else "extract_iso.py"
+        )
+        chosen = menu.exec(self.btn_template_upload.mapToGlobal(self.btn_template_upload.rect().bottomLeft()))
+        if chosen != act_extract_iso:
+            return
+        self.upload_template_file(self._template_upload_path())
+
+    def upload_template_file(self, template_path: Path) -> bool:
+        if not self.session or not self.session.get("files"):
+            QMessageBox.warning(self, t("common.error"), t("common.no_connection"))
+            return False
+        if not self.current_dir:
+            QMessageBox.warning(self, t("common.error"), "Dizin seçili değil.")
+            return False
+        if not template_path.exists():
+            QMessageBox.warning(
+                self,
+                t("common.error"),
+                t("dirs.template_missing").format(path=str(template_path))
+                if t("dirs.template_missing") != "[dirs.template_missing]"
+                else f"Template file not found: {template_path}",
+            )
+            return False
+        return self._apply_local_upload([str(template_path)], self.current_dir)
+
     # ---------- upload / download ----------
     def upload_files(self):
         if not self.session or not self.session.get("files"):
@@ -1450,18 +1507,7 @@ class RemoteDirPanel(QWidget):
         paths, _ = QFileDialog.getOpenFileNames(self, t("dirs.upload") if t("dirs.upload") != "[dirs.upload]" else "Yükle")
         if not paths:
             return
-        files = self.session["files"]
-        ok = 0
-        for lp in paths:
-            name = os.path.basename(lp)
-            rp = self.current_dir.rstrip("/") + "/" + name
-            try:
-                files.upload(lp, rp)
-                ok += 1
-            except Exception as e:
-                QMessageBox.warning(self, t("common.error"), f"Yüklenemedi: {name}\n{e}")
-        if ok:
-            self.refresh()
+        self._apply_local_upload(paths, self.current_dir)
 
     def download_selected(self):
         if not self.session or not self.session.get("files"):
@@ -1483,13 +1529,7 @@ class RemoteDirPanel(QWidget):
         )
         if not target_dir:
             return
-        for rp in sel:
-            name = rp.rstrip("/").split("/")[-1]
-            lp = os.path.join(target_dir, name)
-            try:
-                files.download(rp, lp)
-            except Exception as e:
-                QMessageBox.warning(self, t("common.error"), f"İndirilemedi: {name}\n{e}")
+        self._apply_remote_download(sel, target_dir)
 
     # ---------- drag/drop apply ----------
     def _apply_drag_drop(self, src_paths: List[str], dest_dir: str, *, is_copy: bool, src_panel_id: str) -> bool:

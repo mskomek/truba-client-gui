@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import posixpath
+import shlex
+
 from .slurm_base import SlurmBackend
 from truba_gui.ssh.client import SSHClientWrapper
 
@@ -14,7 +17,12 @@ class SSHSlurmBackend(SlurmBackend):
         return out if out.strip() else (err or f"[exit={code}]")
 
     def sbatch(self, script_path: str) -> str:
-        cmd = f"sbatch {script_path}"
+        script_dir = posixpath.dirname(script_path) or "."
+        script_name = posixpath.basename(script_path)
+        cmd = (
+            f"cd -- {shlex.quote(script_dir)}"
+            f" && sbatch -- {shlex.quote(script_name)}"
+        )
         code, out, err = self.ssh.run(cmd)
         return out if out.strip() else (err or f"[exit={code}]")
 
@@ -33,3 +41,9 @@ class SSHSlurmBackend(SlurmBackend):
         cmd = f"scontrol show job {job_id}"
         code, out, err = self.ssh.run(cmd)
         return out if out.strip() else (err or f"[exit={code}]")
+
+    def lssrv(self) -> str:
+        code, out, err = self.ssh.run("lssrv")
+        if code != 0:
+            raise RuntimeError(err.strip() or out.strip() or f"lssrv failed [exit={code}]")
+        return out

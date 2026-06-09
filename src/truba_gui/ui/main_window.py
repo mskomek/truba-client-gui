@@ -81,6 +81,7 @@ class MainWindow(QMainWindow):
 
         self.jobs_outputs.request_show_directories.connect(self.show_directories)
         self.directories.open_in_editor.connect(self.open_in_editor)
+        self.directories.script_submitted.connect(self.on_script_submitted)
         self.editor.script_submitted.connect(self.on_script_submitted)
 
     def graceful_shutdown(self) -> None:
@@ -220,6 +221,7 @@ class MainWindow(QMainWindow):
         try:
             dlg = SettingsDialog(self)
             dlg.exec()
+            self.jobs_outputs.apply_refresh_settings()
         except Exception:
             pass
 

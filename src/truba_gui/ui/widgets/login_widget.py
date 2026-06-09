@@ -47,12 +47,13 @@ class _ConnectionWorker(QObject):
     finished = Signal(object)
     failed = Signal(str, object)
 
-    def __init__(self, cfg: SSHConfig, shell_size: tuple[int, int], log_cb, shell_output_cb):
+    def __init__(self, cfg: SSHConfig, shell_size: tuple[int, int], log_cb, shell_output_cb, disconnect_cb=None):
         super().__init__()
         self._cfg = cfg
         self._shell_size = shell_size
         self._log_cb = log_cb
         self._shell_output_cb = shell_output_cb
+        self._disconnect_cb = disconnect_cb
 
     def run(self) -> None:
         try:
@@ -65,7 +66,12 @@ class _ConnectionWorker(QObject):
                 host_key_policy=self._cfg.host_key_policy,
                 x11_forwarding=self._cfg.x11_forwarding,
             )
-            ssh = SSHClientWrapper(conn, log_cb=self._log_cb, shell_output_cb=self._shell_output_cb)
+            ssh = SSHClientWrapper(
+                conn,
+                log_cb=self._log_cb,
+                shell_output_cb=self._shell_output_cb,
+                disconnect_cb=self._disconnect_cb,
+            )
             ssh.connect(shell_size=self._shell_size)
             slurm = SSHSlurmBackend(ssh)
             files = SSHFilesBackend(ssh)
@@ -87,6 +93,7 @@ class LoginWidget(QWidget):
     session_changed = Signal(object)
     console_message = Signal(str)
     shell_output_message = Signal(str)
+    ssh_disconnected = Signal(str)
 
     def __init__(self):
         super().__init__()
@@ -95,6 +102,7 @@ class LoginWidget(QWidget):
         # ---- Left: profiles
         self.profiles_list = QListWidget()
         self.profiles_list.itemSelectionChanged.connect(self.on_profile_selected)
+        self.profiles_list.itemDoubleClicked.connect(self._on_profile_double_clicked)
         self.profiles_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.profiles_list.customContextMenuRequested.connect(self.show_profile_context_menu)
 
@@ -146,6 +154,7 @@ class LoginWidget(QWidget):
         self.btn_run_cmd = QPushButton(t("login.run_command") if t("login.run_command") != "[login.run_command]" else "Çalıştır")
         self.btn_run_cmd.clicked.connect(self.cmd_in.submit_current)
         self.cmd_in.command_submitted.connect(self.run_command_text)
+        self.cmd_in.reconnect_requested.connect(self._prompt_reconnect)
 
         cmd_row = QHBoxLayout()
         cmd_row.addWidget(self.cmd_in)
@@ -199,11 +208,14 @@ class LoginWidget(QWidget):
         self._connect_worker: _ConnectionWorker | None = None
         self._connect_in_progress = False
         self._pending_old_ssh = None
+        self._reconnect_prompt_open = False
         self.console_message.connect(self._append_console_to_widget)
         self.shell_output_message.connect(self._append_shell_output_to_widget)
+        self.ssh_disconnected.connect(self._handle_ssh_disconnected)
 
         self.refresh_profiles()
         self.btn_connect.setEnabled(False)
+        self.cmd_in.set_connected(False)
 
     def shutdown_external_processes(self) -> None:
         """Called by MainWindow on app exit."""
@@ -418,9 +430,16 @@ class LoginWidget(QWidget):
         self.btn_connect.setEnabled(False)
         self.btn_add_connection.setEnabled(False)
         self.status_label.setText("Bağlanılıyor")
+        self.cmd_in.set_connected(False)
 
         thread = QThread(self)
-        worker = _ConnectionWorker(cfg, self._console_shell_geometry(), self.append_console, self.append_shell_output)
+        worker = _ConnectionWorker(
+            cfg,
+            self._console_shell_geometry(),
+            self.append_console,
+            self.append_shell_output,
+            self._notify_ssh_disconnected,
+        )
         self._connect_thread = thread
         self._connect_worker = worker
         worker.moveToThread(thread)
@@ -458,6 +477,7 @@ class LoginWidget(QWidget):
                     pass
             self._session = {"connected": True, "cfg": cfg, "ssh": ssh, "slurm": slurm, "files": files}
             self.status_label.setText(t("login.status_connected") if t("login.status_connected") != "[login.status_connected]" else "Bağlı")
+            self.cmd_in.set_connected(True)
             self.append_console("SSH bağlantısı kuruldu.")
             self._sync_shell_geometry()
             try:
@@ -473,6 +493,7 @@ class LoginWidget(QWidget):
 
     def _on_connect_failed(self, message: str, exc: object) -> None:
         self.status_label.setText(t("login.status_disconnected") if t("login.status_disconnected") != "[login.status_disconnected]" else "Bağlı değil")
+        self.cmd_in.set_connected(False)
         self.append_console(t("login.conn_error_prefix").format(err=message))
         if "SSH protocol banner" in message or "banner" in message.lower():
             self.append_console(
@@ -604,10 +625,20 @@ class LoginWidget(QWidget):
             return
         self.profiles_list.setCurrentItem(item)
         menu = QMenu(self)
+        act_connect = menu.addAction(t("login.connect") if t("login.connect") != "[login.connect]" else "Bağlan")
         act_edit = menu.addAction(t("connection.edit_action") if t("connection.edit_action") != "[connection.edit_action]" else "Edit")
         chosen = menu.exec(self.profiles_list.mapToGlobal(pos))
+        if chosen == act_connect:
+            self.connect_selected_profile()
+            return
         if chosen == act_edit:
             self.open_edit_connection_dialog(item.text())
+
+    def _on_profile_double_clicked(self, item) -> None:
+        if item is None:
+            return
+        self.profiles_list.setCurrentItem(item)
+        self.connect_selected_profile()
 
     def _save_profile_from_dialog(self, profile: dict) -> bool:
         self._load_profile_into_fields(profile)
@@ -777,7 +808,10 @@ class LoginWidget(QWidget):
         if not cmd:
             return
         ssh = self._session.get("ssh")
-        if not ssh:
+        if not ssh or not self._session.get("connected", False):
+            if cmd.lower() == "r":
+                self._prompt_reconnect()
+                return
             self.append_console("SSH bagli degil (Mock modda komut calistirilmaz).")
             return
 
@@ -793,7 +827,49 @@ class LoginWidget(QWidget):
                 return
             raise RuntimeError("interactive shell unavailable")
         except Exception as e:
+            if self._session.get("connected", False):
+                self._handle_ssh_disconnected(str(e) or "SSH bağlantısı kesildi.")
             self.append_console(t("login.cmd_error").format(err=e))
+
+    def _notify_ssh_disconnected(self, reason: str) -> None:
+        try:
+            self.ssh_disconnected.emit(reason or "SSH bağlantısı kesildi.")
+        except Exception:
+            pass
+
+    def _handle_ssh_disconnected(self, reason: str) -> None:
+        if not self._session.get("connected", False):
+            return
+        self._session["connected"] = False
+        self.status_label.setText(t("login.status_disconnected") if t("login.status_disconnected") != "[login.status_disconnected]" else "Bağlı değil")
+        self.cmd_in.set_connected(False)
+        notice = t("login.reconnect_notice").format(reason=reason or "")
+        if notice != "[login.reconnect_notice]":
+            self.append_console(notice)
+        self.session_changed.emit(self._session)
+        self._prompt_reconnect()
+
+    def _prompt_reconnect(self) -> None:
+        if self._connect_in_progress:
+            return
+        if self._session.get("connected", False):
+            return
+        if getattr(self, "_reconnect_prompt_open", False):
+            return
+        self._reconnect_prompt_open = True
+        try:
+            ans = QMessageBox.question(
+                self,
+                t("login.reconnect_prompt_title"),
+                t("login.reconnect_prompt_message"),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            if ans == QMessageBox.StandardButton.Yes:
+                self.append_console(t("login.reconnect_started"))
+                self.connect_clicked()
+        finally:
+            self._reconnect_prompt_open = False
 
     def retranslate_ui(self):
         """Update user-facing texts when language changes."""

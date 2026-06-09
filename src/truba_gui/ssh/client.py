@@ -113,6 +113,7 @@ class SSHClientWrapper:
         logger: Optional[Callable[[str], None]] = None,
         log_cb: Optional[Callable[[str], None]] = None,
         shell_output_cb: Optional[Callable[[str], None]] = None,
+        disconnect_cb: Optional[Callable[[str], None]] = None,
     ):
         # Accept both `logger` and legacy `log_cb` kwarg.
         # Also allow passing SSHConnInfo as first positional arg (info).
@@ -125,6 +126,7 @@ class SSHClientWrapper:
         self._shell_geometry: Tuple[int, int] = (120, 40)
         self._log = logger or log_cb
         self._shell_output_cb = shell_output_cb
+        self._disconnect_cb = disconnect_cb
         self._filelog = get_logger("truba_gui.ssh")
 
     def log(self, msg: str) -> None:
@@ -290,6 +292,8 @@ class SSHClientWrapper:
                 break
 
     def _shell_reader_loop(self, channel) -> None:
+        unexpected_disconnect = False
+        disconnect_reason = ""
         while not self._shell_stop.is_set():
             try:
                 if channel.recv_ready():
@@ -298,14 +302,24 @@ class SSHClientWrapper:
                         self._handle_shell_output(data.decode(errors="replace"))
                     continue
                 if getattr(channel, "closed", False) or channel.exit_status_ready():
+                    unexpected_disconnect = True
+                    disconnect_reason = "SSH shell session ended."
                     break
             except socket.timeout:
                 continue
             except Exception as exc:
                 if not self._shell_stop.is_set():
                     self.log(f"SSH: shell session read failed ({exc})")
+                    unexpected_disconnect = True
+                    disconnect_reason = str(exc)
                 break
             time.sleep(0.1)
+        if unexpected_disconnect and not self._shell_stop.is_set():
+            try:
+                self.close()
+            except Exception:
+                pass
+            self._notify_disconnect(disconnect_reason or "SSH shell session ended.")
 
     def _handle_shell_output(self, text: str) -> None:
         if not text:
@@ -338,6 +352,14 @@ class SSHClientWrapper:
                     thread.join(timeout=1.0)
                 except Exception:
                     pass
+
+    def _notify_disconnect(self, reason: str) -> None:
+        if not self._disconnect_cb:
+            return
+        try:
+            self._disconnect_cb(reason or "SSH bağlantısı kesildi.")
+        except Exception:
+            pass
 
     def close(self) -> None:
         self.log("SSH: closing")

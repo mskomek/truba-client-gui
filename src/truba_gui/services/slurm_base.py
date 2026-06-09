@@ -15,3 +15,6 @@ class SlurmBackend(ABC):
 
     @abstractmethod
     def scontrol_show_job(self, job_id: str) -> str: ...
+
+    @abstractmethod
+    def lssrv(self) -> str: ...
