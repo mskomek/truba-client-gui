@@ -5,7 +5,7 @@ import re
 import shlex
 
 from PySide6.QtCore import QTimer, Signal
-from PySide6.QtGui import QFontDatabase
+from PySide6.QtGui import QFontDatabase, QTextCursor
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QPushButton, QTextEdit,
     QLineEdit, QLabel, QMessageBox, QTabWidget
@@ -99,6 +99,7 @@ class JobsOutputsWidget(QWidget):
         self.active_out: str = ""
         self.active_err: str = ""
         self._last_sig = [None, None]  # (size,mtime) for out/err
+        self._tail_paused = False
 
         self.section_tabs = QTabWidget(self)
         self.details_tab = QWidget(self.section_tabs)
@@ -109,12 +110,13 @@ class JobsOutputsWidget(QWidget):
         self.jobs_box = QGroupBox(t("jobs.title") if t("jobs.title") != "[jobs.title]" else "İşler")
         self.jobs_text = QTextEdit()
         self.jobs_text.setReadOnly(True)
+        self._apply_terminal_output_style(self.jobs_text)
 
         self.btn_refresh = QPushButton(t("jobs.refresh") if t("jobs.refresh") != "[jobs.refresh]" else "Yenile")
         self.btn_refresh.clicked.connect(self.refresh_jobs)
 
         self.cancel_id = QLineEdit()
-        self.cancel_id.setPlaceholderText("Job ID")
+        self.cancel_id.setPlaceholderText(t("jobs.job_id"))
         self.btn_cancel = QPushButton(t("jobs.cancel") if t("jobs.cancel") != "[jobs.cancel]" else "İşi İptal Et")
         self.btn_cancel.clicked.connect(self.cancel_job)
 
@@ -129,14 +131,15 @@ class JobsOutputsWidget(QWidget):
         vj.addWidget(self.jobs_text)
 
         # --- Accounting / details box
-        self.meta_box = QGroupBox("Accounting & Details")
+        self.meta_box = QGroupBox(t("jobs_outputs.accounting_details"))
         self.meta_text = QTextEdit()
         self.meta_text.setReadOnly(True)
-        self.meta_text.setPlaceholderText("sacct / scontrol results")
+        self.meta_text.setPlaceholderText(t("jobs_outputs.accounting_placeholder"))
+        self._apply_terminal_output_style(self.meta_text)
         self.meta_job_id = QLineEdit()
-        self.meta_job_id.setPlaceholderText("Job ID")
-        self.btn_sacct = QPushButton("Refresh sacct")
-        self.btn_scontrol = QPushButton("Show job details")
+        self.meta_job_id.setPlaceholderText(t("jobs.job_id"))
+        self.btn_sacct = QPushButton(t("jobs_outputs.refresh_sacct"))
+        self.btn_scontrol = QPushButton(t("jobs_outputs.show_job_details"))
         self.btn_sacct.clicked.connect(self.refresh_sacct)
         self.btn_scontrol.clicked.connect(self.show_job_details)
         meta_row = QHBoxLayout()
@@ -154,14 +157,7 @@ class JobsOutputsWidget(QWidget):
         self.btn_lssrv.clicked.connect(self.refresh_lssrv)
         self.lssrv_text = QTextEdit()
         self.lssrv_text.setReadOnly(True)
-        self.lssrv_text.setLineWrapMode(QTextEdit.NoWrap)
-        self.lssrv_text.setFont(
-            QFontDatabase.systemFont(QFontDatabase.FixedFont)
-        )
-        self.lssrv_text.setStyleSheet(
-            "QTextEdit { background-color: #1e1e1e; color: #e8e8e8; "
-            "border: 1px solid #555; }"
-        )
+        self._apply_terminal_output_style(self.lssrv_text)
         lssrv_layout = QVBoxLayout(self.lssrv_box)
         lssrv_row = QHBoxLayout()
         lssrv_row.addWidget(self.btn_lssrv)
@@ -192,29 +188,51 @@ class JobsOutputsWidget(QWidget):
 
         self.lbl_script = QLabel(t("jobs_outputs.no_script") if t("jobs_outputs.no_script") != "[jobs_outputs.no_script]" else "Aktif Slurm Script: (yok)")
         vg.addWidget(self.lbl_script)
+        self.btn_tail_pause = QPushButton()
+        self.btn_tail_pause.clicked.connect(self._toggle_tail_pause)
+        tail_controls = QHBoxLayout()
+        tail_controls.addWidget(self.btn_tail_pause)
+        tail_controls.addStretch(1)
+        vg.addLayout(tail_controls)
 
         # Output-1: stdout
-        b1 = QGroupBox((t("jobs_outputs.output_stdout") if t("jobs_outputs.output_stdout") != "[jobs_outputs.output_stdout]" else "Çıktı-1: Output"))
-        v1 = QVBoxLayout(b1)
+        self.out_box = QGroupBox(t("jobs_outputs.output_stdout"))
+        v1 = QVBoxLayout(self.out_box)
         self.path_out = QLineEdit()
         self.path_out.setReadOnly(True)
+        self.search_out = QLineEdit()
+        self.btn_search_out = QPushButton()
+        self.search_out.returnPressed.connect(lambda: self._find_in_output(0))
+        self.btn_search_out.clicked.connect(lambda: self._find_in_output(0))
+        search_out_row = QHBoxLayout()
+        search_out_row.addWidget(self.search_out)
+        search_out_row.addWidget(self.btn_search_out)
         self.txt_out = QTextEdit()
         self.txt_out.setReadOnly(True)
         v1.addWidget(self.path_out)
+        v1.addLayout(search_out_row)
         v1.addWidget(self.txt_out)
 
         # Output-2: stderr
-        b2 = QGroupBox((t("jobs_outputs.output_stderr") if t("jobs_outputs.output_stderr") != "[jobs_outputs.output_stderr]" else "Çıktı-2: Error"))
-        v2 = QVBoxLayout(b2)
+        self.err_box = QGroupBox(t("jobs_outputs.output_stderr"))
+        v2 = QVBoxLayout(self.err_box)
         self.path_err = QLineEdit()
         self.path_err.setReadOnly(True)
+        self.search_err = QLineEdit()
+        self.btn_search_err = QPushButton()
+        self.search_err.returnPressed.connect(lambda: self._find_in_output(1))
+        self.btn_search_err.clicked.connect(lambda: self._find_in_output(1))
+        search_err_row = QHBoxLayout()
+        search_err_row.addWidget(self.search_err)
+        search_err_row.addWidget(self.btn_search_err)
         self.txt_err = QTextEdit()
         self.txt_err.setReadOnly(True)
         v2.addWidget(self.path_err)
+        v2.addLayout(search_err_row)
         v2.addWidget(self.txt_err)
 
-        vg.addWidget(b1)
-        vg.addWidget(b2)
+        vg.addWidget(self.out_box)
+        vg.addWidget(self.err_box)
         outputs_layout.addWidget(self.out_group)
         outputs_layout.addStretch(1)
 
@@ -236,6 +254,15 @@ class JobsOutputsWidget(QWidget):
         self.section_tabs.setCurrentIndex(0)
         self.retranslate_ui()
 
+    @staticmethod
+    def _apply_terminal_output_style(widget: QTextEdit) -> None:
+        widget.setLineWrapMode(QTextEdit.NoWrap)
+        widget.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
+        widget.setStyleSheet(
+            "QTextEdit { background-color: #111111; color: #e8e8e8; "
+            "border: 1px solid #555; selection-background-color: #264f78; }"
+        )
+
     def set_session(self, session):
         self.session = session
         self.jobs_text.setPlainText("")
@@ -250,6 +277,8 @@ class JobsOutputsWidget(QWidget):
         self.active_out = ""
         self.active_err = ""
         self._last_sig = [None, None]
+        self._tail_paused = False
+        self._update_tail_pause_button()
         self._live_timer.stop()
         self._jobs_refresh_timer.stop()
         self.apply_refresh_settings()
@@ -320,7 +349,9 @@ class JobsOutputsWidget(QWidget):
             return
         jobid = (self.meta_job_id.text() or "").strip() or (self.cancel_id.text() or "").strip()
         if not jobid:
-            QMessageBox.information(self, t("common.info"), "Job ID required.")
+            QMessageBox.information(
+                self, t("common.info"), t("jobs_outputs.job_id_required")
+            )
             return
         try:
             txt = self.session["slurm"].scontrol_show_job(jobid)
@@ -416,7 +447,7 @@ class JobsOutputsWidget(QWidget):
             return
 
         self.active_script = script_path
-        self.lbl_script.setText(f"Aktif Slurm Script: {script_path}")
+        self.lbl_script.setText(t("jobs_outputs.active_script").format(path=script_path))
 
         out_raw, err_raw = parse_output_error(script_text)
         job_name = parse_job_name(script_text)
@@ -455,6 +486,34 @@ class JobsOutputsWidget(QWidget):
         if self._live_timer.interval() != _LIVE_TAIL_INTERVAL_MS:
             self._live_timer.setInterval(_LIVE_TAIL_INTERVAL_MS)
 
+    def _update_tail_pause_button(self) -> None:
+        key = "jobs_outputs.tail_resume" if self._tail_paused else "jobs_outputs.tail_pause"
+        self.btn_tail_pause.setText(t(key))
+
+    def _toggle_tail_pause(self) -> None:
+        self._tail_paused = not self._tail_paused
+        self._update_tail_pause_button()
+        if self._tail_paused:
+            self._live_timer.stop()
+            return
+        if self.active_out or self.active_err:
+            self._apply_live_refresh_interval()
+            self._live_timer.start()
+            self._poll_live()
+
+    def _find_in_output(self, slot: int) -> None:
+        search = self.search_out if slot == 0 else self.search_err
+        output = self.txt_out if slot == 0 else self.txt_err
+        query = search.text()
+        if not query:
+            return
+        if output.find(query):
+            return
+        cursor = output.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.Start)
+        output.setTextCursor(cursor)
+        output.find(query)
+
     @staticmethod
     def _set_live_text(widget: QTextEdit, text: str) -> None:
         widget.setPlainText(text)
@@ -462,6 +521,8 @@ class JobsOutputsWidget(QWidget):
         scrollbar.setValue(scrollbar.maximum())
 
     def _poll_live(self):
+        if self._tail_paused:
+            return
         if not self.session:
             self._live_timer.stop()
             return
@@ -530,7 +591,7 @@ class JobsOutputsWidget(QWidget):
             except Exception as e:
                 self._set_live_text(
                     self.txt_out,
-                    missing_file_message("Output", e),
+                    missing_file_message(t("jobs_outputs.output_kind"), e),
                 )
                 sig = None
             if sig:
@@ -547,7 +608,7 @@ class JobsOutputsWidget(QWidget):
             except Exception as e:
                 self._set_live_text(
                     self.txt_err,
-                    missing_file_message("Error", e),
+                    missing_file_message(t("jobs_outputs.error_kind"), e),
                 )
                 sig = None
             if sig:
@@ -568,12 +629,22 @@ class JobsOutputsWidget(QWidget):
         self.section_tabs.setTabText(1, files_title)
         self.section_tabs.setTabText(2, outputs_title)
         self.jobs_box.setTitle(t("jobs.title") if t("jobs.title") != "[jobs.title]" else "İşler")
-        self.meta_box.setTitle("Accounting & Details")
+        self.meta_box.setTitle(t("jobs_outputs.accounting_details"))
         self.lssrv_box.setTitle(t("jobs_outputs.lssrv_title"))
         self.out_group.setTitle(outputs_title)
+        self.out_box.setTitle(t("jobs_outputs.output_stdout"))
+        self.err_box.setTitle(t("jobs_outputs.output_stderr"))
         self.lbl_script.setText(t("jobs_outputs.no_script") if t("jobs_outputs.no_script") != "[jobs_outputs.no_script]" else "Aktif Slurm Script: (yok)")
         self.btn_refresh.setText(t("jobs.refresh") if t("jobs.refresh") != "[jobs.refresh]" else "Yenile")
         self.btn_cancel.setText(t("jobs.cancel") if t("jobs.cancel") != "[jobs.cancel]" else "İşi İptal Et")
-        self.btn_sacct.setText("Refresh sacct")
-        self.btn_scontrol.setText("Show job details")
+        self.cancel_id.setPlaceholderText(t("jobs.job_id"))
+        self.meta_job_id.setPlaceholderText(t("jobs.job_id"))
+        self.meta_text.setPlaceholderText(t("jobs_outputs.accounting_placeholder"))
+        self.btn_sacct.setText(t("jobs_outputs.refresh_sacct"))
+        self.btn_scontrol.setText(t("jobs_outputs.show_job_details"))
         self.btn_lssrv.setText(t("jobs_outputs.lssrv_refresh"))
+        self.search_out.setPlaceholderText(t("jobs_outputs.search_placeholder"))
+        self.search_err.setPlaceholderText(t("jobs_outputs.search_placeholder"))
+        self.btn_search_out.setText(t("jobs_outputs.search_next"))
+        self.btn_search_err.setText(t("jobs_outputs.search_next"))
+        self._update_tail_pause_button()

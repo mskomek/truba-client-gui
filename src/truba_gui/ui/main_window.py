@@ -1,9 +1,14 @@
 import webbrowser
 
-from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QTabWidget
-from PySide6.QtWidgets import QMenu, QToolButton, QWidget, QSizePolicy, QHBoxLayout
+from PySide6.QtWidgets import (
+    QApplication, QMainWindow, QMessageBox, QProgressDialog, QSystemTrayIcon,
+    QTabWidget
+)
+from PySide6.QtWidgets import (
+    QMenu, QToolButton, QWidget, QSizePolicy, QHBoxLayout, QLabel
+)
 from PySide6.QtGui import QAction, QIcon, QPixmap, QPainter, QColor
-from PySide6.QtCore import QObject, QThread, Qt, QSize, Signal, Slot
+from PySide6.QtCore import QObject, QThread, QTimer, Qt, QSize, Signal, Slot
 from PySide6.QtSvg import QSvgRenderer
 
 from truba_gui import __version__
@@ -29,6 +34,7 @@ class _BackgroundCall(QObject):
     finished = Signal(object)
     failed = Signal(str)
     done = Signal()
+    progress = Signal(int, str)
 
     def __init__(self, fn):
         super().__init__()
@@ -37,7 +43,7 @@ class _BackgroundCall(QObject):
     @Slot()
     def run(self) -> None:
         try:
-            self.finished.emit(self._fn())
+            self.finished.emit(self._fn(self.progress.emit))
         except Exception as exc:
             self.failed.emit(str(exc))
         finally:
@@ -84,6 +90,9 @@ class MainWindow(QMainWindow):
         self._update_jobs: set[QThread] = set()
         self._update_workers: dict[QThread, _BackgroundCall] = {}
         self._update_busy_count = 0
+        self._update_progress: QProgressDialog | None = None
+        self._update_manual = False
+        self._update_interactive = False
         self._init_language_menu()
         self.retranslate_ui()
 
@@ -105,16 +114,25 @@ class MainWindow(QMainWindow):
         self.login.session_changed.connect(self.on_session_changed)
 
         # Job completion monitor
-        from PySide6.QtCore import QTimer
         self.job_timer = QTimer(self)
         self.job_timer.setInterval(5000)
         self.job_timer.timeout.connect(self._poll_jobs)
         self._last_job_ids = set()
+        self._job_monitor_initialized = False
+        self._job_tray = None
+        if QSystemTrayIcon.isSystemTrayAvailable():
+            self._job_tray = QSystemTrayIcon(self)
+            tray_icon = self.windowIcon()
+            if tray_icon.isNull():
+                tray_icon = QApplication.windowIcon()
+            self._job_tray.setIcon(tray_icon)
+            self._job_tray.show()
 
         self.jobs_outputs.request_show_directories.connect(self.show_directories)
         self.directories.open_in_editor.connect(self.open_in_editor)
         self.directories.script_submitted.connect(self.on_script_submitted)
         self.editor.script_submitted.connect(self.on_script_submitted)
+        QTimer.singleShot(1500, lambda: self._check_for_updates(manual=False))
 
     def graceful_shutdown(self) -> None:
         """Graceful, idempotent shutdown sequence.
@@ -130,6 +148,8 @@ class MainWindow(QMainWindow):
             try:
                 if hasattr(self, "job_timer") and self.job_timer:
                     self.job_timer.stop()
+                if getattr(self, "_job_tray", None):
+                    self._job_tray.hide()
             except Exception:
                 pass
 
@@ -218,13 +238,20 @@ class MainWindow(QMainWindow):
         self._update_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         self._update_btn.setAutoRaise(False)
         self._update_btn.setMinimumWidth(100)
-        self._update_btn.clicked.connect(self._check_for_updates)
+        self._update_btn.clicked.connect(
+            lambda: self._check_for_updates(manual=True)
+        )
 
         # Put the button into a container so it doesn't get clipped by the cornerWidget geometry.
         lang_container = QWidget(self)
         lang_container.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
         layout = QHBoxLayout(lang_container)
         layout.setContentsMargins(0, 0, 6, 0)
+        self._version_label = QLabel(f"v{__version__}", lang_container)
+        self._version_label.setStyleSheet(
+            "QLabel { color: #555; padding: 0 8px; font-weight: 600; }"
+        )
+        layout.addWidget(self._version_label)
         layout.addWidget(self._update_btn)
         layout.addWidget(self._settings_btn)
         layout.addWidget(self._help_btn)
@@ -264,6 +291,35 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+    def _show_update_progress(self, value: int, status_key: str) -> None:
+        if self._update_progress is None:
+            dialog = QProgressDialog(self)
+            dialog.setWindowTitle(t("updates.progress_title"))
+            dialog.setCancelButton(None)
+            dialog.setAutoClose(False)
+            dialog.setAutoReset(False)
+            dialog.setMinimumDuration(0)
+            dialog.setRange(0, 100)
+            dialog.setWindowModality(Qt.WindowModality.WindowModal)
+            self._update_progress = dialog
+        self._on_update_progress(value, status_key)
+        self._update_progress.show()
+
+    def _on_update_progress(self, value: int, status_key: str) -> None:
+        if self._update_progress is None:
+            return
+        label = t(f"updates.status_{status_key}")
+        if label.startswith("[updates.status_"):
+            label = status_key
+        self._update_progress.setLabelText(label)
+        self._update_progress.setValue(max(0, min(100, int(value))))
+
+    def _close_update_progress(self) -> None:
+        if self._update_progress is not None:
+            self._update_progress.close()
+            self._update_progress.deleteLater()
+            self._update_progress = None
+
     def _run_update_job(self, fn, on_success) -> None:
         thread = QThread(self)
         worker = _BackgroundCall(fn)
@@ -271,6 +327,7 @@ class MainWindow(QMainWindow):
         thread.started.connect(worker.run)
         worker.finished.connect(on_success)
         worker.failed.connect(self._on_update_error)
+        worker.progress.connect(self._on_update_progress)
         worker.done.connect(thread.quit)
         worker.done.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
@@ -288,21 +345,32 @@ class MainWindow(QMainWindow):
         if self._update_busy_count == 0:
             self._update_btn.setEnabled(True)
 
-    def _check_for_updates(self) -> None:
+    def _check_for_updates(self, manual: bool = True) -> None:
         if self._update_busy_count:
             return
-        self._run_update_job(get_latest_release, self._on_release_checked)
+        self._update_manual = manual
+        self._update_interactive = manual
+        if manual:
+            self._show_update_progress(5, "checking")
+        self._run_update_job(
+            lambda progress: get_latest_release(),
+            self._on_release_checked,
+        )
 
     def _on_release_checked(self, release) -> None:
         if not is_newer_version(release.version, __version__):
-            QMessageBox.information(
-                self,
-                t("updates.title"),
-                t("updates.up_to_date").format(version=__version__),
-            )
+            self._close_update_progress()
+            if self._update_manual:
+                QMessageBox.information(
+                    self,
+                    t("updates.title"),
+                    t("updates.up_to_date").format(version=__version__),
+                )
             return
 
+        self._update_interactive = True
         if not is_frozen_exe():
+            self._close_update_progress()
             QMessageBox.information(
                 self,
                 t("updates.title"),
@@ -312,6 +380,10 @@ class MainWindow(QMainWindow):
                 webbrowser.open(release.html_url)
             return
 
+        if not self._update_manual:
+            self._show_update_progress(10, "available")
+        else:
+            self._on_update_progress(10, "available")
         answer = QMessageBox.question(
             self,
             t("updates.available_title"),
@@ -323,9 +395,14 @@ class MainWindow(QMainWindow):
             QMessageBox.StandardButton.Yes,
         )
         if answer != QMessageBox.StandardButton.Yes:
+            self._close_update_progress()
             return
+        self._on_update_progress(10, "downloading")
         self._run_update_job(
-            lambda: (release, download_and_verify_release(release)),
+            lambda progress: (
+                release,
+                download_and_verify_release(release, progress_cb=progress),
+            ),
             self._on_update_downloaded,
         )
 
@@ -339,8 +416,10 @@ class MainWindow(QMainWindow):
             QMessageBox.StandardButton.Yes,
         )
         if answer != QMessageBox.StandardButton.Yes:
+            self._close_update_progress()
             return
         try:
+            self._on_update_progress(100, "installing")
             launch_update_installer(zip_path, release.version)
         except Exception as exc:
             self._on_update_error(str(exc))
@@ -348,6 +427,9 @@ class MainWindow(QMainWindow):
         QApplication.quit()
 
     def _on_update_error(self, message: str) -> None:
+        self._close_update_progress()
+        if not self._update_interactive:
+            return
         QMessageBox.critical(
             self,
             t("updates.error_title"),
@@ -430,6 +512,14 @@ class MainWindow(QMainWindow):
                     pass
 
     def on_session_changed(self, session):
+        self._session = session
+        self._last_job_ids = set()
+        self._job_monitor_initialized = False
+        if session and session.get("connected"):
+            self.job_timer.start()
+            self._poll_jobs()
+        else:
+            self.job_timer.stop()
         self.jobs_outputs.set_session(session)
         self.directories.set_session(session)
         self.editor.set_session(session)
@@ -470,10 +560,43 @@ class MainWindow(QMainWindow):
             job_ids = set([ln.strip() for ln in out.splitlines() if ln.strip().isdigit()])
         except Exception:
             return
+        if not self._job_monitor_initialized:
+            self._last_job_ids = job_ids
+            self._job_monitor_initialized = True
+            return
         # detect finished
         finished = self._last_job_ids - job_ids
         for jid in sorted(finished):
-            self.login.append_console(t("login.job_finished").format(jobid=jid))
+            state = ""
+            try:
+                code, out, err = ssh.run(
+                    f'sacct -n -X -j {jid} -o State -P'
+                )
+                if code == 0:
+                    state = next(
+                        (
+                            line.split("|", 1)[0].strip().split("+", 1)[0]
+                            for line in out.splitlines()
+                            if line.strip()
+                        ),
+                        "",
+                    )
+            except Exception:
+                pass
+            if state == "COMPLETED":
+                message = t("login.job_completed").format(jobid=jid)
+            elif state:
+                message = t("login.job_failed").format(jobid=jid, state=state)
+            else:
+                message = t("login.job_finished").format(jobid=jid)
+            self.login.append_console(message)
+            if self._job_tray:
+                self._job_tray.showMessage(
+                    t("login.job_notification_title"),
+                    message,
+                    QSystemTrayIcon.MessageIcon.Information,
+                    8000,
+                )
         self._last_job_ids = job_ids
 
     def closeEvent(self, event):

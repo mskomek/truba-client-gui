@@ -27,15 +27,18 @@
     "disconnect": "Disconnect",
     "status_disconnected": "Disconnected",
     "status_connected": "Connected",
-    "status_mock": "Mock mod (simülasyon)",
+    "status_mock": "Mock mode (simulation)",
     "save_password": "Remember password",
     "save_profile": "Save profile",
-    "error": "Bağlantı hatası",
-    "console": "Konsol",
+    "error": "Connection error",
+    "console": "Console",
     "console_placeholder": "Connection and SSH messages will appear here...",
-    "terminal_cmd": "Komut",
-    "terminal_send": "Çalıştır",
+    "terminal_cmd": "Command",
+    "terminal_send": "Run",
     "job_finished": "Job finished: {jobid}",
+    "job_completed": "Job completed successfully: {jobid}",
+    "job_failed": "Job ended: {jobid} (state: {state})",
+    "job_notification_title": "TRUBA job notification",
     "command_placeholder": "Type a command and press Enter/Run",
     "x11_autodeps_tip": "On Connect, plink.exe and VcXsrv are checked. If missing, they will be downloaded (with your consent) and started.",
     "close_vcxsrv_tip": "If VcXsrv was started by TrubaGUI, it will be closed by PID.",
@@ -68,7 +71,9 @@
     "reconnect_prompt_message": "The SSH session ended unexpectedly. Do you want to reconnect?",
     "reconnect_notice": "SSH connection dropped: {reason}\nPress r or choose Yes to reconnect.",
     "reconnect_started": "Reconnecting...",
-    "reconnect_placeholder": "Disconnected: type r and press Enter to reconnect"
+    "reconnect_placeholder": "Disconnected: type r and press Enter to reconnect",
+    "strict_host_key": "Strict host key checking",
+    "status_connecting": "Connecting..."
   },
   "settings": {
     "action": "Settings",
@@ -87,6 +92,13 @@
     "ready_title": "Update ready",
     "ready_message": "v{version} was downloaded and verified.\n\nClose the application and install it now?",
     "source_mode": "v{version} is available. Automatic installation is available only in the packaged Windows build; the GitHub page will open.",
+    "progress_title": "Application Update",
+    "status_checking": "Checking for updates...",
+    "status_available": "A new version is available.",
+    "status_downloading": "Downloading the update...",
+    "status_verifying": "Verifying the downloaded file...",
+    "status_ready": "The update is ready to install.",
+    "status_installing": "Installing the update and restarting the application...",
     "error_title": "Update error",
     "error_message": "The update could not be completed:\n{error}"
   },
@@ -116,6 +128,7 @@
   },
   "files": {
     "title": "Outputs",
+    "placeholder": "Outputs will be shown here.",
     "remote_dir": "Remote directory",
     "list": "List",
     "output1": "Output-1",
@@ -147,7 +160,11 @@
     "validation_missing_sbatch": "- No #SBATCH directives found",
     "validation_placeholders": "- Template placeholders detected (USERNAME / <partition>)",
     "validation_missing_time": "- Time limit is not set (#SBATCH --time or -t)",
-    "validation_missing_output": "- Output file is not set (#SBATCH --output or -o)"
+    "validation_missing_output": "- Output file is not set (#SBATCH --output or -o)",
+    "remote": "Remote:",
+    "open_failed": "Could not open file: {err}",
+    "save_failed": "Could not save file: {err}",
+    "submit_error": "Submission error: {err}"
   },
   "dirs": {
     "refresh": "Refresh",
@@ -212,7 +229,13 @@
     "submit_sbatch": "Submit with sbatch",
     "submit_success": "Submitted with sbatch. Job ID: {jobid}",
     "submit_failed": "sbatch submission failed: {err}\nCheck the connection and Slurm script directives.",
-    "submit_failed_no_job_id": "Submission returned no valid job ID. Check the script and Slurm response."
+    "submit_failed_no_job_id": "Submission returned no valid job ID. Check the script and Slurm response.",
+    "folder_not_editable": "Folders cannot be edited.",
+    "rename_single_required": "Select exactly one item to rename.",
+    "delete_confirm": "Delete the selected items?",
+    "no_file_selected": "No file selected.",
+    "no_directory_selected": "No directory selected.",
+    "conflict_message": "The target already exists:\n{path}\n\nWhat would you like to do?"
   },
   "jobs_outputs": {
     "scratch_title": "Scratch (/arf/scratch)",
@@ -225,12 +248,24 @@
     "output": "Output",
     "file": "File",
     "no_script": "Active Slurm script: (none)",
-    "output_stdout": "Output-1: stdout",
-    "output_stderr": "Output-2: stderr",
+    "output_stdout": "Output 1: Standard Output",
+    "output_stderr": "Output 2: Error Output",
+    "output_kind": "Output",
+    "error_kind": "Error output",
+    "active_script": "Active Slurm script: {path}",
     "open_out1": "Follow in Output 1",
     "open_out2": "Follow in Output 2",
     "waiting_for_file": "The {kind} file does not exist yet. Job state: {state}. It will be retried on every refresh.",
-    "waiting_for_file_unknown": "The {kind} file does not exist yet ({error}). It will be retried on every refresh."
+    "waiting_for_file_unknown": "The {kind} file does not exist yet ({error}). It will be retried on every refresh.",
+    "accounting_details": "Accounting & Job Details",
+    "accounting_placeholder": "sacct / scontrol results",
+    "refresh_sacct": "Refresh sacct",
+    "show_job_details": "Show job details",
+    "job_id_required": "Job ID is required.",
+    "search_placeholder": "Search output",
+    "search_next": "Next",
+    "tail_pause": "Pause live follow",
+    "tail_resume": "Resume live follow"
   },
   "putty": {
     "downloading": "Downloading plink.exe...",
@@ -280,6 +315,15 @@
     "english": "English"
   },
   "logs": {
+    "title": "Logs",
+    "refresh": "Refresh",
+    "copy": "Copy",
+    "copy_path": "Copy Log Path",
+    "export_diagnostics": "Export Diagnostics",
+    "select_output_folder": "Select output folder",
+    "diagnostics_title": "Diagnostics",
+    "bundle_created": "Bundle created:\n{path}",
+    "bundle_failed": "Failed to create bundle: {err}",
     "not_created": "Log file has not been created yet: {path}",
     "read_failed": "Failed to read log: {err}"
   },

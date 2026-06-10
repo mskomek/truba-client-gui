@@ -23,10 +23,10 @@ class LogsWidget(QWidget):
         self.btn_copy = QPushButton(t("logs.copy") if t("logs.copy") != "[logs.copy]" else "Kopyala")
         self.btn_copy.clicked.connect(self.copy_all)
 
-        self.btn_copy_path = QPushButton("Copy Log Path")
+        self.btn_copy_path = QPushButton(t("logs.copy_path"))
         self.btn_copy_path.clicked.connect(self.copy_log_path)
 
-        self.btn_diag = QPushButton("Export Diagnostics")
+        self.btn_diag = QPushButton(t("logs.export_diagnostics"))
         self.btn_diag.clicked.connect(self.export_diagnostics)
 
         top = QHBoxLayout()
@@ -48,6 +48,13 @@ class LogsWidget(QWidget):
         self._timer.start()
 
         self.refresh()
+
+    def retranslate_ui(self) -> None:
+        self.lbl.setText(t("logs.title"))
+        self.btn_refresh.setText(t("logs.refresh"))
+        self.btn_copy.setText(t("logs.copy"))
+        self.btn_copy_path.setText(t("logs.copy_path"))
+        self.btn_diag.setText(t("logs.export_diagnostics"))
 
     def refresh(self) -> None:
         p = log_path()
@@ -72,11 +79,11 @@ class LogsWidget(QWidget):
         QGuiApplication.clipboard().setText(str(log_path()))
 
     def export_diagnostics(self) -> None:
-        target_dir = QFileDialog.getExistingDirectory(self, "Select output folder")
+        target_dir = QFileDialog.getExistingDirectory(self, t("logs.select_output_folder"))
         if not target_dir:
             return
         try:
             p = create_diagnostic_bundle(target_dir)
-            QMessageBox.information(self, "Diagnostics", f"Bundle created:\n{p}")
+            QMessageBox.information(self, t("logs.diagnostics_title"), t("logs.bundle_created").format(path=p))
         except Exception as e:
-            QMessageBox.critical(self, "Diagnostics", f"Failed: {e}")
+            QMessageBox.critical(self, t("logs.diagnostics_title"), t("logs.bundle_failed").format(err=e))

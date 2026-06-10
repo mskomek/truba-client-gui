@@ -41,5 +41,5 @@ jobs:
           name: v${{ github.event.inputs.version }}
           body_path: dist/releases/v${{ github.event.inputs.version }}/CHANGELOG.md
           files: |
-            dist/releases/v${{ github.event.inputs.version }}/truba-client-gui_v${{ github.event.inputs.version }}_windows_onedir.zip
-            dist/releases/v${{ github.event.inputs.version }}/truba-client-gui_v${{ github.event.inputs.version }}_windows_onedir.zip.sha256
+            dist/releases/v${{ github.event.inputs.version }}/truba-client-gui_windows_onedir.zip
+            dist/releases/v${{ github.event.inputs.version }}/truba-client-gui_windows_onedir.zip.sha256

@@ -121,7 +121,7 @@ class LoginWidget(QWidget):
         self.btn_browse_key.clicked.connect(self.pick_key)
 
         self.cb_x11 = QCheckBox(t("login.x11_enable") if t("login.x11_enable") != "[login.x11_enable]" else "X11 Forwarding")
-        self.cb_strict_hostkey = QCheckBox("Strict host key checking")
+        self.cb_strict_hostkey = QCheckBox(t("login.strict_host_key"))
 
         # Simulation / dry-run option removed from UI.
         # (If a legacy profile contains a 'dry_run' field, it is ignored.)
@@ -142,6 +142,10 @@ class LoginWidget(QWidget):
         self.console.setReadOnly(True)
         self.console.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         self.console.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+        self.console.setStyleSheet(
+            "QPlainTextEdit { background-color: #111111; color: #e8e8e8; "
+            "border: 1px solid #555; selection-background-color: #264f78; }"
+        )
         self.console.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         ph = t("login.console_placeholder")
         self.console.setPlaceholderText(ph)
@@ -150,6 +154,11 @@ class LoginWidget(QWidget):
 
         # ---- SSH terminal line
         self.cmd_in = TerminalInput()
+        self.cmd_in.setStyleSheet(
+            "QLineEdit { background-color: #111111; color: #e8e8e8; "
+            "border: 1px solid #555; padding: 4px; "
+            "selection-background-color: #264f78; }"
+        )
         self.cmd_in.setPlaceholderText(t("login.command_placeholder"))
         self.btn_run_cmd = QPushButton(t("login.run_command") if t("login.run_command") != "[login.run_command]" else "Çalıştır")
         self.btn_run_cmd.clicked.connect(self.cmd_in.submit_current)
@@ -160,18 +169,20 @@ class LoginWidget(QWidget):
         cmd_row.addWidget(self.cmd_in)
         cmd_row.addWidget(self.btn_run_cmd)
 
-        form = QFormLayout()
-        form.addRow(t("login.profile_name_label"), self.profile_name)
-        form.addRow(t("login.host"), self.host)
-        form.addRow(t("login.port"), self.port)
-        form.addRow(t("login.username"), self.username)
-        form.addRow(t("login.password"), self.password)
-        form.addRow("", self.cb_save_password)
+        self.form = QFormLayout()
+        self.form.addRow(t("login.profile_name_label"), self.profile_name)
+        self.form.addRow(t("login.host"), self.host)
+        self.form.addRow(t("login.port"), self.port)
+        self.form.addRow(t("login.username"), self.username)
+        self.form.addRow(t("login.password"), self.password)
+        self.form.addRow("", self.cb_save_password)
 
         key_row = QHBoxLayout()
         key_row.addWidget(self.key_path)
         key_row.addWidget(self.btn_browse_key)
-        form.addRow(t("login.ssh_key") if t("login.ssh_key") != "[login.ssh_key]" else "SSH Anahtar", key_row)
+        self.key_row_widget = QWidget()
+        self.key_row_widget.setLayout(key_row)
+        self.form.addRow(t("login.ssh_key"), self.key_row_widget)
 
         btn_row = QHBoxLayout()
         btn_row.addWidget(self.btn_save)
@@ -186,7 +197,8 @@ class LoginWidget(QWidget):
         action_row.addStretch(1)
         right_lay.addLayout(action_row)
         right_lay.addWidget(self.status_label)
-        right_lay.addWidget(QLabel(t("login.console_title") if t("login.console_title") != "[login.console_title]" else "Konsol"))
+        self.console_title_label = QLabel(t("login.console_title"))
+        right_lay.addWidget(self.console_title_label)
         right_lay.addWidget(self.console)
         right_lay.addLayout(cmd_row)
 
@@ -432,7 +444,7 @@ class LoginWidget(QWidget):
             pass
         self.btn_connect.setEnabled(False)
         self.btn_add_connection.setEnabled(False)
-        self.status_label.setText("Bağlanılıyor")
+        self.status_label.setText(t("login.status_connecting"))
         self.cmd_in.set_connected(False)
 
         thread = QThread(self)
@@ -906,11 +918,24 @@ class LoginWidget(QWidget):
         """Update user-facing texts when language changes."""
         try:
             self.cb_x11.setText(t("login.x11_enable"))
-            self.cb_strict_hostkey.setText("Strict host key checking")
+            self.cb_strict_hostkey.setText(t("login.strict_host_key"))
             # dry-run removed
             self.cb_save_password.setText(t("login.save_password"))
             self.btn_browse_key.setText(t("login.browse"))
             self.btn_save.setText(t("login.save"))
+            labels = (
+                (self.profile_name, "login.profile_name_label"),
+                (self.host, "login.host"),
+                (self.port, "login.port"),
+                (self.username, "login.username"),
+                (self.password, "login.password"),
+                (self.key_row_widget, "login.ssh_key"),
+            )
+            for field, key in labels:
+                label = self.form.labelForField(field)
+                if label is not None:
+                    label.setText(t(key))
+            self.console_title_label.setText(t("login.console_title"))
             self.console.setPlaceholderText(t("login.console_placeholder"))
             self.cmd_in.setPlaceholderText(t("login.command_placeholder"))
             self.btn_run_cmd.setText(t("login.run_command"))

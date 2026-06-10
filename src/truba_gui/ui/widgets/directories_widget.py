@@ -89,6 +89,8 @@ class DirectoriesWidget(QWidget):
         self.btn_new_slurm.setText(
             t("dirs.new_slurm_edit") if t("dirs.new_slurm_edit") != "[dirs.new_slurm_edit]" else "Create/Edit ARF Slurm"
         )
+        self.panel_scratch.retranslate_ui()
+        self.panel_home.retranslate_ui()
 
     def submit_script(self, script_path: str) -> None:
         slurm = (self.session or {}).get("slurm")

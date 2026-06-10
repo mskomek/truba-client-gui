@@ -6,7 +6,7 @@ class OutputsWidget(QWidget):
         super().__init__()
         self.session = None
         lay = QVBoxLayout(self)
-        lay.addWidget(QLabel("Outputs (sonraki adım: remote dir + log viewer)"))
+        lay.addWidget(QLabel(t("files.placeholder")))
         lay.addStretch(1)
 
     def set_session(self, session):

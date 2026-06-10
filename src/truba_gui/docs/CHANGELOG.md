@@ -1,11 +1,14 @@
 # Changelog
 
+## v1.1.4
+- Interface: added the current version to the top bar and switched Jobs, Accounting, `lssrv`, and terminal output areas to dark monospace rendering.
+- Updates: added automatic startup checks, a visible download/install progress dialog, and stable versionless release asset names.
+- Localization: completed the Turkish and English UI text audit and translated previously hardcoded interface messages.
+- Live output: improved Output 1 and Output 2 following with one-second refresh, missing-file retries, automatic bottom scrolling, and a 500-line limit.
+- Output controls: added per-panel search plus pause and resume controls without losing the active followed files.
+- Job monitoring: added Windows notifications for completed and failed Slurm jobs.
+
 ## v1.1.3
-- Jobs outputs: resolved Slurm `%x`, `%j`, and `%A` placeholders so parsed output and error files are followed with `tail`.
-- Jobs files: fixed the Output 1 and Output 2 context-menu actions to switch to Outputs, load immediately, and continue live polling.
-- Saved profiles: cached the encryption master password only in memory for the application session, cleared it on shutdown, and re-prompted when a profile uses a different master password.
-- Updates: added an in-app GitHub Releases update check, SHA256-verified ZIP download, automatic Windows restart/install flow, install logging, and rollback protection.
-- Releases: GitHub Actions now publishes the versioned onedir ZIP and SHA256 as GitHub Release assets.
 - Jobs files: added translated context-menu actions to follow any selected file in Output 1 or Output 2, with independent active sources for both panels.
 - Jobs outputs: keep retrying Slurm output and error files while they are waiting to be created.
 - Live output: refresh followed files every second, automatically scroll to the newest content, and load at most the latest 500 lines.

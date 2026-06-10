@@ -9,6 +9,7 @@ import sys
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from truba_gui import __version__
 from truba_gui.core.paths import app_data_dir, is_frozen_exe
@@ -18,6 +19,10 @@ GITHUB_REPOSITORY = "mskomek/truba-client-gui"
 GITHUB_LATEST_RELEASE_API = (
     f"https://api.github.com/repos/{GITHUB_REPOSITORY}/releases/latest"
 )
+RELEASE_EXE_NAME = "truba-client-gui.exe"
+RELEASE_ZIP_NAME = "truba-client-gui_windows_onedir.zip"
+RELEASE_SHA_NAME = f"{RELEASE_ZIP_NAME}.sha256"
+ProgressCallback = Callable[[int, str], None]
 
 
 @dataclass(frozen=True)
@@ -70,8 +75,8 @@ def get_latest_release(timeout: float = 30.0) -> UpdateRelease:
         raise RuntimeError("GitHub release tag does not contain a version.")
     version = version_match.group(1)
 
-    expected_zip = f"truba-client-gui_v{version}_windows_onedir.zip"
-    expected_sha = f"{expected_zip}.sha256"
+    expected_zip = RELEASE_ZIP_NAME
+    expected_sha = RELEASE_SHA_NAME
     assets = {
         str(asset.get("name") or ""): str(asset.get("browser_download_url") or "")
         for asset in payload.get("assets") or []
@@ -92,35 +97,80 @@ def get_latest_release(timeout: float = 30.0) -> UpdateRelease:
     )
 
 
-def _download(url: str, destination: Path, timeout: float = 120.0) -> None:
+def _download(
+    url: str,
+    destination: Path,
+    timeout: float = 120.0,
+    progress_cb: ProgressCallback | None = None,
+    progress_start: int = 0,
+    progress_end: int = 100,
+    status: str = "",
+) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_suffix(destination.suffix + ".part")
     try:
         with _request(url, timeout=timeout) as response, temporary.open("wb") as output:
+            total = int(response.headers.get("Content-Length") or 0)
+            downloaded = 0
             while True:
                 chunk = response.read(1024 * 1024)
                 if not chunk:
                     break
                 output.write(chunk)
+                downloaded += len(chunk)
+                if progress_cb:
+                    if total > 0:
+                        fraction = min(1.0, downloaded / total)
+                        value = progress_start + int(
+                            (progress_end - progress_start) * fraction
+                        )
+                    else:
+                        value = progress_start
+                    progress_cb(value, status)
         temporary.replace(destination)
+        if progress_cb:
+            progress_cb(progress_end, status)
     finally:
         if temporary.exists():
             temporary.unlink(missing_ok=True)
 
 
-def download_and_verify_release(release: UpdateRelease) -> Path:
+def download_and_verify_release(
+    release: UpdateRelease,
+    progress_cb: ProgressCallback | None = None,
+) -> Path:
     update_dir = app_data_dir() / "updates" / f"v{release.version}"
     zip_path = update_dir / release.zip_name
     sha_path = update_dir / release.sha_name
 
-    _download(release.sha_url, sha_path)
-    _download(release.zip_url, zip_path)
+    if progress_cb:
+        progress_cb(10, "downloading")
+    _download(
+        release.sha_url,
+        sha_path,
+        progress_cb=progress_cb,
+        progress_start=10,
+        progress_end=15,
+        status="downloading",
+    )
+    _download(
+        release.zip_url,
+        zip_path,
+        progress_cb=progress_cb,
+        progress_start=15,
+        progress_end=90,
+        status="downloading",
+    )
 
+    if progress_cb:
+        progress_cb(95, "verifying")
     expected = sha_path.read_text(encoding="ascii", errors="ignore").strip().split()[0]
     actual = hashlib.sha256(zip_path.read_bytes()).hexdigest()
     if not expected or actual.lower() != expected.lower():
         zip_path.unlink(missing_ok=True)
         raise RuntimeError("Downloaded update SHA256 verification failed.")
+    if progress_cb:
+        progress_cb(100, "ready")
     return zip_path
 
 
@@ -136,9 +186,10 @@ def build_update_script(
     new_version: str,
     process_id: int,
 ) -> str:
-    new_exe = install_dir / f"truba-client-gui_v{new_version}_windows.exe"
+    new_exe = install_dir / RELEASE_EXE_NAME
     staging_dir = zip_path.parent / "staging"
     backup_internal = zip_path.parent / "_internal.backup"
+    backup_exe = zip_path.parent / "truba-client-gui.exe.backup"
     install_log = zip_path.parent / "update-install.log"
     return f"""$ErrorActionPreference = "Stop"
 $oldPid = {process_id}
@@ -146,6 +197,7 @@ $zipPath = {_powershell_literal(str(zip_path))}
 $installDir = {_powershell_literal(str(install_dir))}
 $stagingDir = {_powershell_literal(str(staging_dir))}
 $backupInternal = {_powershell_literal(str(backup_internal))}
+$backupExe = {_powershell_literal(str(backup_exe))}
 $installLog = {_powershell_literal(str(install_log))}
 $currentExe = {_powershell_literal(str(current_exe))}
 $newExe = {_powershell_literal(str(new_exe))}
@@ -173,6 +225,12 @@ try {{
     if (Test-Path -LiteralPath $internalDir) {{
         Move-Item -LiteralPath $internalDir -Destination $backupInternal
     }}
+    if (Test-Path -LiteralPath $backupExe) {{
+        Remove-Item -LiteralPath $backupExe -Force
+    }}
+    if (Test-Path -LiteralPath $currentExe) {{
+        Copy-Item -LiteralPath $currentExe -Destination $backupExe -Force
+    }}
 
     Copy-Item -Path (Join-Path $stagingDir "*") -Destination $installDir -Recurse -Force
     if (-not (Test-Path -LiteralPath $newExe)) {{
@@ -192,6 +250,9 @@ try {{
     if (Test-Path -LiteralPath $backupInternal) {{
         Remove-Item -LiteralPath $backupInternal -Recurse -Force
     }}
+    if (Test-Path -LiteralPath $backupExe) {{
+        Remove-Item -LiteralPath $backupExe -Force
+    }}
     Write-UpdateLog "Update to v{new_version} completed"
 }} catch {{
     Write-UpdateLog "Update failed: $($_.Exception.Message)"
@@ -204,6 +265,10 @@ try {{
     }}
     if (($newExe -ne $currentExe) -and (Test-Path -LiteralPath $newExe)) {{
         Remove-Item -LiteralPath $newExe -Force
+    }}
+    if (Test-Path -LiteralPath $backupExe) {{
+        Copy-Item -LiteralPath $backupExe -Destination $currentExe -Force
+        Remove-Item -LiteralPath $backupExe -Force
     }}
     if (Test-Path -LiteralPath $currentExe) {{
         Start-Process -FilePath $currentExe -WorkingDirectory $installDir

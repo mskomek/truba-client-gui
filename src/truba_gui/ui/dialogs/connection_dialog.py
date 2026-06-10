@@ -51,7 +51,7 @@ class ConnectionDialog(QDialog):
         self.btn_browse_key.clicked.connect(self.pick_key)
 
         self.cb_x11 = QCheckBox(t("login.x11_enable"))
-        self.cb_strict_hostkey = QCheckBox("Strict host key checking")
+        self.cb_strict_hostkey = QCheckBox(t("login.strict_host_key"))
 
         form = QFormLayout()
         form.addRow(t("login.profile_name_label"), self.profile_name)

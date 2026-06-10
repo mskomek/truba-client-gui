@@ -35,7 +35,8 @@ class EditorWidget(QWidget):
         self.btn_lint.clicked.connect(self.run_lint)
 
         top = QHBoxLayout()
-        top.addWidget(QLabel("Remote:"))
+        self.lbl_remote = QLabel(t("editor.remote"))
+        top.addWidget(self.lbl_remote)
         top.addWidget(self.path_in, 1)
         top.addWidget(self.btn_load)
         top.addWidget(self.btn_lint)
@@ -57,6 +58,7 @@ class EditorWidget(QWidget):
         self.text.setPlainText(content)
 
     def retranslate_ui(self):
+        self.lbl_remote.setText(t("editor.remote"))
         self.btn_load.setText(t("editor.open"))
         self.btn_lint.setText(t("editor.lint") if t("editor.lint") != "[editor.lint]" else "Lint")
         self.btn_save.setText(t("editor.save"))
@@ -91,7 +93,7 @@ class EditorWidget(QWidget):
             self.open_file(path, content)
             append_event({"type": "editor_load", "path": path})
         except Exception as e:
-            show_exception(self, title=t("common.error"), user_message=f"Dosya açılamadı: {e}", exc=e, area="EDITOR")
+            show_exception(self, title=t("common.error"), user_message=t("editor.open_failed").format(err=e), exc=e, area="EDITOR")
 
     def save_path(self, force_submit: bool = False):
         if not self.session or not self.session.get("files"):
@@ -109,7 +111,7 @@ class EditorWidget(QWidget):
             append_event({"type": "editor_save", "path": path})
             self._offer_submit_after_save(path, force_submit=force_submit)
         except Exception as e:
-            show_exception(self, title=t("common.error"), user_message=f"Kaydedilemedi: {e}", exc=e, area="EDITOR")
+            show_exception(self, title=t("common.error"), user_message=t("editor.save_failed").format(err=e), exc=e, area="EDITOR")
 
     def _validate_before_save(self, path: str, text: str) -> bool:
         is_slurm = path.lower().endswith((".slurm", ".sbatch"))
@@ -171,7 +173,7 @@ class EditorWidget(QWidget):
                     (t("editor.submit_failed") if t("editor.submit_failed") != "[editor.submit_failed]" else "Submission failed.") + "\n\n" + hint + ("\n\n" + details if details else ""),
                 )
         except Exception as e:
-            show_exception(self, title=t("common.error"), user_message=f"Gonderim hatasi: {e}", exc=e, area="SLURM")
+            show_exception(self, title=t("common.error"), user_message=t("editor.submit_error").format(err=e), exc=e, area="SLURM")
 
     @staticmethod
     def _extract_job_id(sbatch_output: str) -> str:

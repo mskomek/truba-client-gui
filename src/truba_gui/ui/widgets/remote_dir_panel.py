@@ -368,7 +368,8 @@ class RemoteDirPanel(QWidget):
 
         lay = QVBoxLayout(self)
         lay.addLayout(top)
-        lay.addWidget(QLabel(t("dirs.path") if t("dirs.path") != "[dirs.path]" else "Dizin:"))
+        self.path_label = QLabel(t("dirs.path"))
+        lay.addWidget(self.path_label)
         lay.addWidget(self.path)
         lay.addWidget(self.tabs)
 
@@ -378,7 +379,8 @@ class RemoteDirPanel(QWidget):
         self.queue_current = QLabel("-")
         self.queue_list = QListWidget()
         self.queue_list.setMinimumHeight(80)
-        qlay.addWidget(QLabel(t("dirs.queue_current") if t("dirs.queue_current") != "[dirs.queue_current]" else "Şu an:"))
+        self.queue_current_label = QLabel(t("dirs.queue_current"))
+        qlay.addWidget(self.queue_current_label)
 
         # ---- active batch tracking (for graceful shutdown / diagnostics)
         self._active_thread: Optional[QThread] = None
@@ -387,13 +389,37 @@ class RemoteDirPanel(QWidget):
         self._active_step: int = 0
         self._active_title: str = ""
         qlay.addWidget(self.queue_current)
-        qlay.addWidget(QLabel(t("dirs.queue_next") if t("dirs.queue_next") != "[dirs.queue_next]" else "Sıradaki:"))
+        self.queue_next_label = QLabel(t("dirs.queue_pending"))
+        qlay.addWidget(self.queue_next_label)
         qlay.addWidget(self.queue_list)
         self.queue_group.setVisible(False)
         lay.addWidget(self.queue_group)
 
         self._update_undo_enabled()
         self._update_navigation_controls()
+
+    def retranslate_ui(self) -> None:
+        self.btn_upload.setText(t("dirs.upload"))
+        self.btn_template_upload.setText(t("dirs.template_upload"))
+        self.btn_download.setText(t("dirs.download_selected"))
+        self.btn_delete.setText(t("dirs.delete"))
+        self.btn_undo.setText(t("dirs.undo"))
+        self.btn_refresh.setText(t("dirs.refresh"))
+        self.path_label.setText(t("dirs.path"))
+        self.queue_group.setTitle(t("dirs.queue_title"))
+        self.queue_current_label.setText(t("dirs.queue_current"))
+        self.queue_next_label.setText(t("dirs.queue_pending"))
+        tab_keys = ("all", "folders", "iso", "archives", "slurm", "other")
+        for index, key in enumerate(tab_keys):
+            self.tabs.setTabText(index, t(f"dirs.tab_{key}"))
+        headers = [
+            t("dirs.col_name"),
+            t("dirs.col_size"),
+            t("dirs.col_type"),
+            t("dirs.col_mtime"),
+        ]
+        for view in self.views.values():
+            view.setHeaderLabels(headers)
 
     def _make_view(self) -> _RemoteTree:
         w = _RemoteTree(panel=self)
@@ -734,9 +760,9 @@ class RemoteDirPanel(QWidget):
 
         # Local -> Remote paste (from OS clipboard)
         if has_local_urls:
-            act_paste_local_here = menu.addAction("Yerelden Yapıştır")
+            act_paste_local_here = menu.addAction(t("dirs.paste_from_local"))
             if clicked_path and clicked_is_dir:
-                act_paste_local_into = menu.addAction("Yerelden klasöre yapıştır")
+                act_paste_local_into = menu.addAction(t("dirs.paste_from_local_into"))
             menu.addSeparator()
 
         # Remote -> Remote paste (internal clipboard)
@@ -745,7 +771,7 @@ class RemoteDirPanel(QWidget):
             if clicked_path and clicked_is_dir:
                 act_paste_into = menu.addAction(t("dirs.paste_into") if t("dirs.paste_into") != "[dirs.paste_into]" else "Klasöre Yapıştır")
             # Remote -> Local paste (download to a chosen local folder)
-            act_paste_to_local = menu.addAction("Yerel'e Yapıştır")
+            act_paste_to_local = menu.addAction(t("dirs.paste_to_local"))
             menu.addSeparator()
         act_submit = None
         act_edit = act_download = act_rename = act_copy = act_move = act_delete = None
@@ -818,7 +844,7 @@ class RemoteDirPanel(QWidget):
             rp = sel_paths[0]
             try:
                 files.listdir(rp.rstrip("/"))
-                QMessageBox.information(self, t("common.info"), "Klasör düzenlenemez.")
+                QMessageBox.information(self, t("common.info"), t("dirs.folder_not_editable"))
                 return
             except Exception:
                 pass
@@ -838,14 +864,14 @@ class RemoteDirPanel(QWidget):
         # Rename
         if act_rename is not None and chosen == act_rename:
             if len(sel_paths) != 1:
-                QMessageBox.information(self, t("common.info"), "Yeniden adlandırmak için tek bir öğe seçin.")
+                QMessageBox.information(self, t("common.info"), t("dirs.rename_single_required"))
                 return
             old = sel_paths[0]
             base = old.rstrip("/").split("/")[-1]
             new_name, ok = QInputDialog.getText(
                 self,
                 t("dirs.rename") if t("dirs.rename") != "[dirs.rename]" else "Yeniden Adlandır",
-                "Yeni ad:",
+                t("dirs.rename_label"),
                 text=base,
             )
             if not ok or not new_name.strip():
@@ -875,7 +901,7 @@ class RemoteDirPanel(QWidget):
         files = self.session["files"]
         if not paths:
             return
-        msg = "Seçilen öğeler silinsin mi?\n" + "\n".join([p.split("/")[-1] for p in paths[:10]])
+        msg = t("dirs.delete_confirm") + "\n" + "\n".join([p.split("/")[-1] for p in paths[:10]])
         if len(paths) > 10:
             msg += f"\n... (+{len(paths)-10})"
         if QMessageBox.question(
@@ -906,7 +932,7 @@ class RemoteDirPanel(QWidget):
                 break
         sel = self.selected_paths(tab_key)
         if not sel:
-            QMessageBox.information(self, t("common.info"), "Dosya seçilmedi.")
+            QMessageBox.information(self, t("common.info"), t("dirs.no_file_selected"))
             return
         self._delete_paths(sel)
 
@@ -916,14 +942,14 @@ class RemoteDirPanel(QWidget):
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Question)
         box.setWindowTitle(t("common.confirm"))
-        box.setText(f"Hedefte zaten var:\n{dst}\n\nNe yapmak istiyorsun?")
-        overwrite_btn = box.addButton("Üzerine yaz", QMessageBox.ButtonRole.AcceptRole)
-        skip_btn = box.addButton("Atla", QMessageBox.ButtonRole.DestructiveRole)
-        rename_btn = box.addButton("Yeniden adlandır", QMessageBox.ButtonRole.ActionRole)
+        box.setText(t("dirs.conflict_message").format(path=dst))
+        overwrite_btn = box.addButton(t("dirs.conflict_overwrite"), QMessageBox.ButtonRole.AcceptRole)
+        skip_btn = box.addButton(t("dirs.conflict_skip"), QMessageBox.ButtonRole.DestructiveRole)
+        rename_btn = box.addButton(t("dirs.conflict_rename"), QMessageBox.ButtonRole.ActionRole)
         cancel_btn = box.addButton(QMessageBox.StandardButton.Cancel)
         box.setDefaultButton(overwrite_btn)
 
-        cb = QCheckBox("Tüm çakışmalara uygula")
+        cb = QCheckBox(t("common.apply_all"))
         box.setCheckBox(cb)
 
         box.exec()
@@ -1270,7 +1296,9 @@ class RemoteDirPanel(QWidget):
         clip = get_file_clipboard().get()
         if not clip or not clip.paths:
             return
-        target_dir = QFileDialog.getExistingDirectory(self, "Yerel klasör seç")
+        target_dir = QFileDialog.getExistingDirectory(
+            self, t("dirs.select_local_folder")
+        )
         if not target_dir:
             return
         ok = self._apply_remote_download(clip.paths, target_dir)
@@ -1475,7 +1503,7 @@ class RemoteDirPanel(QWidget):
             QMessageBox.warning(self, t("common.error"), t("common.no_connection"))
             return
         if not self.current_dir:
-            QMessageBox.warning(self, t("common.error"), "Dizin seçili değil.")
+            QMessageBox.warning(self, t("common.error"), t("dirs.no_directory_selected"))
             return
 
         menu = QMenu(self)
@@ -1492,7 +1520,7 @@ class RemoteDirPanel(QWidget):
             QMessageBox.warning(self, t("common.error"), t("common.no_connection"))
             return False
         if not self.current_dir:
-            QMessageBox.warning(self, t("common.error"), "Dizin seçili değil.")
+            QMessageBox.warning(self, t("common.error"), t("dirs.no_directory_selected"))
             return False
         if not template_path.exists():
             QMessageBox.warning(
@@ -1511,7 +1539,7 @@ class RemoteDirPanel(QWidget):
             QMessageBox.warning(self, t("common.error"), t("common.no_connection"))
             return
         if not self.current_dir:
-            QMessageBox.warning(self, t("common.error"), "Dizin seçili değil.")
+            QMessageBox.warning(self, t("common.error"), t("dirs.no_directory_selected"))
             return
         paths, _ = QFileDialog.getOpenFileNames(self, t("dirs.upload") if t("dirs.upload") != "[dirs.upload]" else "Yükle")
         if not paths:
@@ -1531,7 +1559,7 @@ class RemoteDirPanel(QWidget):
                 break
         sel = self.selected_paths(tab_key)
         if not sel:
-            QMessageBox.information(self, t("common.info"), "Dosya seçilmedi.")
+            QMessageBox.information(self, t("common.info"), t("dirs.no_file_selected"))
             return
         target_dir = QFileDialog.getExistingDirectory(
             self, t("dirs.download_selected") if t("dirs.download_selected") != "[dirs.download_selected]" else "Seçilenleri İndir"

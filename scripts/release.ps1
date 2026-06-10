@@ -79,13 +79,12 @@ if (-not (Test-Path $exePath)) {
     throw "Expected packaged exe not found: $exePath"
 }
 
-$versionedExeName = "truba-client-gui_v$Version`_windows.exe"
-Rename-Item -Path $exePath -NewName $versionedExeName
+$releaseExeName = "truba-client-gui.exe"
 
 $releaseChangelogPath = Join-Path $versionDir "CHANGELOG.md"
 Set-Content -Path $releaseChangelogPath -Value $releaseChangelogContent -Encoding utf8
 
-$releaseZipName = "truba-client-gui_v$Version`_windows_onedir.zip"
+$releaseZipName = "truba-client-gui_windows_onedir.zip"
 $releaseZipPath = Join-Path $versionDir $releaseZipName
 if (Test-Path $releaseZipPath) { Remove-Item $releaseZipPath -Force }
 
@@ -97,6 +96,6 @@ $hash = Get-FileHash $releaseZipPath -Algorithm SHA256
 
 Write-Host "Release artifacts:"
 Write-Host " - $releaseChangelogPath"
-Write-Host " - $(Join-Path $versionDir $versionedExeName)"
+Write-Host " - $(Join-Path $versionDir $releaseExeName)"
 Write-Host " - $releaseZipPath"
 Write-Host " - $releaseShaPath"
