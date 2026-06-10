@@ -75,6 +75,19 @@
     "dialog_title": "Ayarlar",
     "save": "Kaydet"
   },
+  "updates": {
+    "action": "Güncelle",
+    "check_tip": "GitHub Releases üzerinden güncellemeleri denetle",
+    "title": "Güncelleme",
+    "up_to_date": "En güncel sürümü kullanıyorsunuz: v{version}",
+    "available_title": "Yeni sürüm var",
+    "available_message": "Mevcut sürüm: v{current}\nYeni sürüm: v{latest}\n\nGitHub üzerinden indirilsin mi?",
+    "ready_title": "Güncelleme hazır",
+    "ready_message": "v{version} indirildi ve doğrulandı.\n\nUygulama kapatılıp güncellensin mi?",
+    "source_mode": "v{version} bulundu. Otomatik kurulum yalnız paketlenmiş Windows sürümünde kullanılabilir; GitHub sayfası açılacak.",
+    "error_title": "Güncelleme hatası",
+    "error_message": "Güncelleme tamamlanamadı:\n{error}"
+  },
   "common": {
     "ok": "Tamam",
     "cancel": "İptal",
@@ -212,8 +225,10 @@
     "no_script": "Aktif Slurm Script: (yok)",
     "output_stdout": "Çıktı-1: Output",
     "output_stderr": "Çıktı-2: Error",
-    "open_out1": "Çıktı-1'de Aç",
-    "open_out2": "Çıktı-2'de Aç"
+    "open_out1": "Çıktı 1'de takip et",
+    "open_out2": "Çıktı 2'de takip et",
+    "waiting_for_file": "{kind} dosyası henüz oluşmadı. İş durumu: {state}. Her yenilemede tekrar denenecek.",
+    "waiting_for_file_unknown": "{kind} dosyası henüz oluşmadı ({error}). Her yenilemede tekrar denenecek."
   },
   "putty": {
     "downloading": "plink.exe indiriliyor...",

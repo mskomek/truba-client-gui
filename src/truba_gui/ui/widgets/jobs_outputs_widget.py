@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import re
+import shlex
 
 from PySide6.QtCore import QTimer, Signal
 from PySide6.QtGui import QFontDatabase
@@ -18,7 +19,11 @@ from truba_gui.core.i18n import t
 from truba_gui.core.ui_errors import show_exception
 from truba_gui.core.history import append_event
 from truba_gui.ui.widgets.remote_dir_panel import RemoteDirPanel
-from truba_gui.services.slurm_script_parser import parse_output_error, resolve_path
+from truba_gui.services.slurm_script_parser import (
+    parse_job_name,
+    parse_output_error,
+    resolve_path,
+)
 
 
 _ANSI_TOKEN_RE = re.compile(
@@ -30,6 +35,8 @@ _ANSI_COLORS = {
     90: "#666666", 91: "#f14c4c", 92: "#23d18b", 93: "#f5f543",
     94: "#3b8eea", 95: "#d670d6", 96: "#29b8db", 97: "#ffffff",
 }
+_LIVE_TAIL_INTERVAL_MS = 1000
+_LIVE_TAIL_LINE_COUNT = 500
 
 
 def _ansi_to_html(text: str) -> str:
@@ -394,6 +401,7 @@ class JobsOutputsWidget(QWidget):
         self.section_tabs.setCurrentWidget(self.outputs_tab)
         self._apply_live_refresh_interval()
         self._live_timer.start()
+        self._poll_live()
         append_event({"type": "open_watch", "slot": slot+1, "path": remote_path})
 
     def _activate_slurm_script(self, script_path: str):
@@ -411,15 +419,11 @@ class JobsOutputsWidget(QWidget):
         self.lbl_script.setText(f"Aktif Slurm Script: {script_path}")
 
         out_raw, err_raw = parse_output_error(script_text)
+        job_name = parse_job_name(script_text)
+        jobid = self.cancel_id.text().strip() or None
         # resolve paths relative to script dir
-        out_path = resolve_path(script_path, out_raw) if out_raw else ""
-        err_path = resolve_path(script_path, err_raw) if err_raw else ""
-
-        # handle %j if jobid provided
-        jobid = self.cancel_id.text().strip()
-        if jobid:
-            out_path = out_path.replace("%j", jobid) if out_path else out_path
-            err_path = err_path.replace("%j", jobid) if err_path else err_path
+        out_path = resolve_path(script_path, out_raw, jobid, job_name) if out_raw else ""
+        err_path = resolve_path(script_path, err_raw, jobid, job_name) if err_raw else ""
 
         if out_path:
             self.open_in_output_slot(0, out_path)
@@ -427,13 +431,14 @@ class JobsOutputsWidget(QWidget):
             self.open_in_output_slot(1, err_path)
 
         self.section_tabs.setCurrentWidget(self.outputs_tab)
+        self._poll_live()
         append_event({"type": "activate_slurm", "script": script_path, "out": out_path, "err": err_path})
 
     # ---------------- Live polling
     def apply_refresh_settings(self) -> None:
         interval_ms = max(1000, get_jobs_outputs_refresh_interval_seconds() * 1000)
-        self._live_timer.setInterval(interval_ms)
         self._jobs_refresh_timer.setInterval(interval_ms)
+        self._apply_live_refresh_interval()
         if self.session and self.session.get("connected"):
             self._jobs_refresh_timer.start()
 
@@ -447,9 +452,14 @@ class JobsOutputsWidget(QWidget):
             self.refresh_lssrv()
 
     def _apply_live_refresh_interval(self) -> None:
-        interval_ms = max(1000, get_jobs_outputs_refresh_interval_seconds() * 1000)
-        if self._live_timer.interval() != interval_ms:
-            self._live_timer.setInterval(interval_ms)
+        if self._live_timer.interval() != _LIVE_TAIL_INTERVAL_MS:
+            self._live_timer.setInterval(_LIVE_TAIL_INTERVAL_MS)
+
+    @staticmethod
+    def _set_live_text(widget: QTextEdit, text: str) -> None:
+        widget.setPlainText(text)
+        scrollbar = widget.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
 
     def _poll_live(self):
         if not self.session:
@@ -462,11 +472,45 @@ class JobsOutputsWidget(QWidget):
             self._live_timer.stop()
             return
 
+        job_state = None
+
+        def current_job_state() -> str:
+            nonlocal job_state
+            if job_state is not None:
+                return job_state
+            job_state = ""
+            jobid = (self.meta_job_id.text() or self.cancel_id.text()).strip()
+            slurm = self.session.get("slurm")
+            if not jobid or not slurm:
+                return job_state
+            try:
+                details = slurm.scontrol_show_job(jobid)
+                match = re.search(r"\bJobState=([A-Z_]+)", details or "")
+                if match:
+                    job_state = match.group(1)
+            except Exception:
+                pass
+            return job_state
+
+        def missing_file_message(kind: str, error: Exception) -> str:
+            state = current_job_state()
+            if state:
+                return t("jobs_outputs.waiting_for_file").format(
+                    kind=kind,
+                    state=state,
+                )
+            return t("jobs_outputs.waiting_for_file_unknown").format(
+                kind=kind,
+                error=error,
+            )
+
         def fetch_tail(path: str) -> str:
             # Prefer SSH tail (efficient). Fallback to read_text (may be heavy).
             if ssh:
                 try:
-                    code, out, err = ssh.run(f"tail -n 200 {path}")
+                    code, out, err = ssh.run(
+                        f"tail -n {_LIVE_TAIL_LINE_COUNT} -- {shlex.quote(path)}"
+                    )
                     if code == 0:
                         return out
                 except Exception:
@@ -474,7 +518,7 @@ class JobsOutputsWidget(QWidget):
             # fallback
             try:
                 txt = files.read_text(path)
-                lines = txt.splitlines()[-200:]
+                lines = txt.splitlines()[-_LIVE_TAIL_LINE_COUNT:]
                 return "\n".join(lines) + ("\n" if lines else "")
             except Exception as e:
                 return f"(Dosya okunamadı: {e})"
@@ -484,22 +528,34 @@ class JobsOutputsWidget(QWidget):
             try:
                 sig = files.stat(self.active_out)
             except Exception as e:
-                self.txt_out.setPlainText(f"(Output dosyası yok/okunamadı: {e})")
+                self._set_live_text(
+                    self.txt_out,
+                    missing_file_message("Output", e),
+                )
                 sig = None
-            if sig and sig != self._last_sig[0]:
+            if sig:
                 self._last_sig[0] = sig
-                self.txt_out.setPlainText(fetch_tail(self.active_out))
+                self._set_live_text(
+                    self.txt_out,
+                    fetch_tail(self.active_out),
+                )
 
         # error
         if self.active_err:
             try:
                 sig = files.stat(self.active_err)
             except Exception as e:
-                self.txt_err.setPlainText(f"(Error dosyası yok/okunamadı: {e})")
+                self._set_live_text(
+                    self.txt_err,
+                    missing_file_message("Error", e),
+                )
                 sig = None
-            if sig and sig != self._last_sig[1]:
+            if sig:
                 self._last_sig[1] = sig
-                self.txt_err.setPlainText(fetch_tail(self.active_err))
+                self._set_live_text(
+                    self.txt_err,
+                    fetch_tail(self.active_err),
+                )
 
         if not self.active_out and not self.active_err:
             self._live_timer.stop()

@@ -1,10 +1,20 @@
-from PySide6.QtWidgets import QMainWindow, QTabWidget
+import webbrowser
+
+from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QTabWidget
 from PySide6.QtWidgets import QMenu, QToolButton, QWidget, QSizePolicy, QHBoxLayout
 from PySide6.QtGui import QAction, QIcon, QPixmap, QPainter, QColor
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import QObject, QThread, Qt, QSize, Signal, Slot
 from PySide6.QtSvg import QSvgRenderer
 
+from truba_gui import __version__
+from truba_gui.core.paths import is_frozen_exe
 from truba_gui.core.i18n import t, set_language
+from truba_gui.services.app_updater import (
+    download_and_verify_release,
+    get_latest_release,
+    is_newer_version,
+    launch_update_installer,
+)
 from .widgets.login_widget import LoginWidget
 from .widgets.jobs_outputs_widget import JobsOutputsWidget
 from .widgets.directories_widget import DirectoriesWidget
@@ -13,6 +23,25 @@ from .widgets.logs_widget import LogsWidget
 from .dialogs.help_dialog import HelpDialog
 from .dialogs.settings_dialog import SettingsDialog
 from .dialogs.quick_tour import QuickTourOverlay
+
+
+class _BackgroundCall(QObject):
+    finished = Signal(object)
+    failed = Signal(str)
+    done = Signal()
+
+    def __init__(self, fn):
+        super().__init__()
+        self._fn = fn
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            self.finished.emit(self._fn())
+        except Exception as exc:
+            self.failed.emit(str(exc))
+        finally:
+            self.done.emit()
 
 
 class MainWindow(QMainWindow):
@@ -52,6 +81,9 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self._shutdown_done = False
+        self._update_jobs: set[QThread] = set()
+        self._update_workers: dict[QThread, _BackgroundCall] = {}
+        self._update_busy_count = 0
         self._init_language_menu()
         self.retranslate_ui()
 
@@ -182,11 +214,18 @@ class MainWindow(QMainWindow):
         self._settings_btn.setMinimumWidth(88)
         self._settings_btn.clicked.connect(self._open_settings)
 
+        self._update_btn = QToolButton(self)
+        self._update_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self._update_btn.setAutoRaise(False)
+        self._update_btn.setMinimumWidth(100)
+        self._update_btn.clicked.connect(self._check_for_updates)
+
         # Put the button into a container so it doesn't get clipped by the cornerWidget geometry.
         lang_container = QWidget(self)
         lang_container.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
         layout = QHBoxLayout(lang_container)
         layout.setContentsMargins(0, 0, 6, 0)
+        layout.addWidget(self._update_btn)
         layout.addWidget(self._settings_btn)
         layout.addWidget(self._help_btn)
         layout.addWidget(self._lang_btn)
@@ -225,6 +264,96 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+    def _run_update_job(self, fn, on_success) -> None:
+        thread = QThread(self)
+        worker = _BackgroundCall(fn)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(on_success)
+        worker.failed.connect(self._on_update_error)
+        worker.done.connect(thread.quit)
+        worker.done.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(lambda current=thread: self._update_job_finished(current))
+        self._update_jobs.add(thread)
+        self._update_workers[thread] = worker
+        self._update_busy_count += 1
+        self._update_btn.setEnabled(False)
+        thread.start()
+
+    def _update_job_finished(self, thread: QThread) -> None:
+        self._update_jobs.discard(thread)
+        self._update_workers.pop(thread, None)
+        self._update_busy_count = max(0, self._update_busy_count - 1)
+        if self._update_busy_count == 0:
+            self._update_btn.setEnabled(True)
+
+    def _check_for_updates(self) -> None:
+        if self._update_busy_count:
+            return
+        self._run_update_job(get_latest_release, self._on_release_checked)
+
+    def _on_release_checked(self, release) -> None:
+        if not is_newer_version(release.version, __version__):
+            QMessageBox.information(
+                self,
+                t("updates.title"),
+                t("updates.up_to_date").format(version=__version__),
+            )
+            return
+
+        if not is_frozen_exe():
+            QMessageBox.information(
+                self,
+                t("updates.title"),
+                t("updates.source_mode").format(version=release.version),
+            )
+            if release.html_url:
+                webbrowser.open(release.html_url)
+            return
+
+        answer = QMessageBox.question(
+            self,
+            t("updates.available_title"),
+            t("updates.available_message").format(
+                current=__version__,
+                latest=release.version,
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self._run_update_job(
+            lambda: (release, download_and_verify_release(release)),
+            self._on_update_downloaded,
+        )
+
+    def _on_update_downloaded(self, result) -> None:
+        release, zip_path = result
+        answer = QMessageBox.question(
+            self,
+            t("updates.ready_title"),
+            t("updates.ready_message").format(version=release.version),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            launch_update_installer(zip_path, release.version)
+        except Exception as exc:
+            self._on_update_error(str(exc))
+            return
+        QApplication.quit()
+
+    def _on_update_error(self, message: str) -> None:
+        QMessageBox.critical(
+            self,
+            t("updates.error_title"),
+            t("updates.error_message").format(error=message),
+        )
+
     def start_quick_tour(self):
         try:
             overlay = QuickTourOverlay(self)
@@ -261,6 +390,9 @@ class MainWindow(QMainWindow):
         if hasattr(self, "_settings_btn"):
             self._settings_btn.setText(t("settings.action"))
             self._settings_btn.setToolTip(t("settings.dialog_title"))
+        if hasattr(self, "_update_btn"):
+            self._update_btn.setText(t("updates.action"))
+            self._update_btn.setToolTip(t("updates.check_tip"))
         # Button shows currently selected language (with flag) and is wide enough
         if hasattr(self, "_lang_btn"):
             cur = getattr(self, "_current_lang", None)

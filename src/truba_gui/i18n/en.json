@@ -77,6 +77,19 @@
     "jobs_outputs_refresh_interval_label": "Jobs & Outputs refresh interval (seconds)",
     "jobs_outputs_refresh_interval_tip": "Live polling interval for Jobs & Outputs; manual refresh stays separate."
   },
+  "updates": {
+    "action": "Update",
+    "check_tip": "Check for updates through GitHub Releases",
+    "title": "Update",
+    "up_to_date": "You are using the latest version: v{version}",
+    "available_title": "Update available",
+    "available_message": "Current version: v{current}\nNew version: v{latest}\n\nDownload it from GitHub?",
+    "ready_title": "Update ready",
+    "ready_message": "v{version} was downloaded and verified.\n\nClose the application and install it now?",
+    "source_mode": "v{version} is available. Automatic installation is available only in the packaged Windows build; the GitHub page will open.",
+    "error_title": "Update error",
+    "error_message": "The update could not be completed:\n{error}"
+  },
   "common": {
     "ok": "OK",
     "cancel": "Cancel",
@@ -214,8 +227,10 @@
     "no_script": "Active Slurm script: (none)",
     "output_stdout": "Output-1: stdout",
     "output_stderr": "Output-2: stderr",
-    "open_out1": "Open in Output-1",
-    "open_out2": "Open in Output-2"
+    "open_out1": "Follow in Output 1",
+    "open_out2": "Follow in Output 2",
+    "waiting_for_file": "The {kind} file does not exist yet. Job state: {state}. It will be retried on every refresh.",
+    "waiting_for_file_unknown": "The {kind} file does not exist yet ({error}). It will be retried on every refresh."
   },
   "putty": {
     "downloading": "Downloading plink.exe...",

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import os
+import posixpath
 import re
 from dataclasses import dataclass
 from typing import Optional, Tuple
@@ -12,6 +12,12 @@ SBATCH_OUT_PATTERNS = [
 SBATCH_ERR_PATTERNS = [
     re.compile(r"^\s*#SBATCH\s+--error\s*=\s*(.+?)\s*$"),
     re.compile(r"^\s*#SBATCH\s+-e\s+(.+?)\s*$"),
+]
+SBATCH_JOB_NAME_PATTERNS = [
+    re.compile(r"^\s*#SBATCH\s+--job-name\s*=\s*(.+?)\s*$"),
+    re.compile(r"^\s*#SBATCH\s+--job-name\s+(.+?)\s*$"),
+    re.compile(r"^\s*#SBATCH\s+-J\s+(.+?)\s*$"),
+    re.compile(r"^\s*#SBATCH\s+-J([^\s].*?)\s*$"),
 ]
 
 def _first_match(lines, patterns) -> Optional[str]:
@@ -28,6 +34,9 @@ def parse_output_error(script_text: str) -> Tuple[Optional[str], Optional[str]]:
     err = _first_match(lines, SBATCH_ERR_PATTERNS)
     return out, err
 
+def parse_job_name(script_text: str) -> Optional[str]:
+    return _first_match(script_text.splitlines(), SBATCH_JOB_NAME_PATTERNS)
+
 def resolve_path(script_remote_path: str, value: str, job_id: Optional[str] = None, job_name: Optional[str] = None) -> str:
     # Replace common placeholders if possible
     if job_id:
@@ -36,6 +45,6 @@ def resolve_path(script_remote_path: str, value: str, job_id: Optional[str] = No
         value = value.replace("%x", str(job_name))
     # If relative, resolve relative to script directory
     if not value.startswith("/"):
-        base = os.path.dirname(script_remote_path)
-        value = base.rstrip("/") + "/" + value
+        base = posixpath.dirname(script_remote_path)
+        value = posixpath.join(base, value)
     return value

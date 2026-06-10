@@ -8,11 +8,12 @@ on:
         required: true
         default: "0.1.0"
 
+permissions:
+  contents: write
+
 jobs:
   build-windows:
     runs-on: windows-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -26,17 +27,19 @@ jobs:
           pip install pyinstaller
       - name: Build release artifacts
         shell: pwsh
-        run: ./scripts/release.ps1 -Version "${{ github.event.inputs.version }}" -ReleaseRoot "dist/releases"
+        run: ./scripts/release.ps1 -Version "${{ github.event.inputs.version }}"
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: truba-client-gui-${{ github.event.inputs.version }}
+          path: |
+            dist/releases/v${{ github.event.inputs.version }}/**
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: v${{ github.event.inputs.version }}
           name: v${{ github.event.inputs.version }}
           body_path: dist/releases/v${{ github.event.inputs.version }}/CHANGELOG.md
           files: |
-            dist/releases/v${{ github.event.inputs.version }}/CHANGELOG.md
-            dist/releases/v${{ github.event.inputs.version }}/truba-client-gui_v${{ github.event.inputs.version }}_windows.exe
             dist/releases/v${{ github.event.inputs.version }}/truba-client-gui_v${{ github.event.inputs.version }}_windows_onedir.zip
             dist/releases/v${{ github.event.inputs.version }}/truba-client-gui_v${{ github.event.inputs.version }}_windows_onedir.zip.sha256

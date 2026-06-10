@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.1.3
+- Jobs outputs: resolved Slurm `%x`, `%j`, and `%A` placeholders so parsed output and error files are followed with `tail`.
+- Jobs files: fixed the Output 1 and Output 2 context-menu actions to switch to Outputs, load immediately, and continue live polling.
+- Saved profiles: cached the encryption master password only in memory for the application session, cleared it on shutdown, and re-prompted when a profile uses a different master password.
+- Updates: added an in-app GitHub Releases update check, SHA256-verified ZIP download, automatic Windows restart/install flow, install logging, and rollback protection.
+- Releases: GitHub Actions now publishes the versioned onedir ZIP and SHA256 as GitHub Release assets.
+- Jobs files: added translated context-menu actions to follow any selected file in Output 1 or Output 2, with independent active sources for both panels.
+- Jobs outputs: keep retrying Slurm output and error files while they are waiting to be created.
+- Live output: refresh followed files every second, automatically scroll to the newest content, and load at most the latest 500 lines.
+
+## v1.1.2
+- Updates: added an in-app GitHub Releases update check, SHA256-verified ZIP download, automatic Windows restart/install flow, install logging, and rollback protection.
+- Releases: GitHub Actions now publishes the versioned onedir ZIP and SHA256 as GitHub Release assets.
+
+## v1.1.1
+- Jobs outputs: resolved Slurm `%x`, `%j`, and `%A` placeholders so parsed output and error files are followed with `tail`.
+- Jobs files: fixed the Output-1 and Output-2 context-menu actions to switch to Outputs, load immediately, and continue live polling.
+- Saved profiles: cached the encryption master password only in memory for the application session, cleared it on shutdown, and re-prompted when a profile uses a different master password.
+
 ## v1.1.0
 - Connection: removed Start Tour from the normal flow and added a dedicated Add Connection dialog plus a Settings dialog for app-level options.
 - Saved profiles: added direct connection on double-click and a Connect action to the context menu.

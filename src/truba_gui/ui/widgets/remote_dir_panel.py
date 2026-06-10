@@ -706,9 +706,19 @@ class RemoteDirPanel(QWidget):
             menu.addSeparator()
 
         # Optional output open actions (JobsOutputsWidget)
-        if self.enable_output_menu and clicked_path:
-            menu.addAction(t("jobs_outputs.open_out1") if t("jobs_outputs.open_out1") != "[jobs_outputs.open_out1]" else "Çıktı-1'de Aç")
-            menu.addAction(t("jobs_outputs.open_out2") if t("jobs_outputs.open_out2") != "[jobs_outputs.open_out2]" else "Çıktı-2'de Aç")
+        act_open_out1 = None
+        act_open_out2 = None
+        if self.enable_output_menu and clicked_path and not clicked_is_dir:
+            act_open_out1 = menu.addAction(
+                t("jobs_outputs.open_out1")
+                if t("jobs_outputs.open_out1") != "[jobs_outputs.open_out1]"
+                else "Çıktı 1'de takip et"
+            )
+            act_open_out2 = menu.addAction(
+                t("jobs_outputs.open_out2")
+                if t("jobs_outputs.open_out2") != "[jobs_outputs.open_out2]"
+                else "Çıktı 2'de takip et"
+            )
             menu.addSeparator()
 
         # Paste actions
@@ -768,13 +778,12 @@ class RemoteDirPanel(QWidget):
             return
 
         # Output actions
-        if self.enable_output_menu and clicked_path:
-            if chosen.text() == (t("jobs_outputs.open_out1") if t("jobs_outputs.open_out1") != "[jobs_outputs.open_out1]" else "Çıktı-1'de Aç"):
-                self.open_in_slot.emit(0, clicked_path)
-                return
-            if chosen.text() == (t("jobs_outputs.open_out2") if t("jobs_outputs.open_out2") != "[jobs_outputs.open_out2]" else "Çıktı-2'de Aç"):
-                self.open_in_slot.emit(1, clicked_path)
-                return
+        if act_open_out1 is not None and chosen == act_open_out1:
+            self.open_in_slot.emit(0, clicked_path)
+            return
+        if act_open_out2 is not None and chosen == act_open_out2:
+            self.open_in_slot.emit(1, clicked_path)
+            return
 
         # Paste (Local -> Remote)
         if act_paste_local_here is not None and chosen == act_paste_local_here:

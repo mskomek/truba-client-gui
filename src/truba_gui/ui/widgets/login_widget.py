@@ -209,6 +209,7 @@ class LoginWidget(QWidget):
         self._connect_in_progress = False
         self._pending_old_ssh = None
         self._reconnect_prompt_open = False
+        self._master_password_cache = ""
         self.console_message.connect(self._append_console_to_widget)
         self.shell_output_message.connect(self._append_shell_output_to_widget)
         self.ssh_disconnected.connect(self._handle_ssh_disconnected)
@@ -252,6 +253,8 @@ class LoginWidget(QWidget):
                     pass
         except Exception:
             pass
+
+        self._master_password_cache = ""
 
     # ---- public helpers
     def append_console(self, msg: str) -> None:
@@ -533,6 +536,9 @@ class LoginWidget(QWidget):
 
     def _ask_master_password(self, *, confirm: bool) -> str | None:
         """Ask user for a master password. Returns None if canceled."""
+        if self._master_password_cache:
+            return self._master_password_cache
+
         title = "Şifreleme Parolası"
         prompt = "Kaydedilen şifreleri şifrelemek/çözmek için bir ana parola girin."
         pw, ok = QInputDialog.getText(self, title, prompt, QLineEdit.EchoMode.Password)
@@ -554,7 +560,37 @@ class LoginWidget(QWidget):
             if pw2 != pw:
                 QMessageBox.warning(self, t("login.err_title"), t("login.err_master_mismatch"))
                 return None
+        self._master_password_cache = pw
         return pw
+
+    def _decrypt_saved_password(self, prof: dict) -> str | None:
+        """Decrypt a saved password and retry if the cached master password is wrong."""
+        token = prof.get("password_enc")
+        salt = prof.get("password_salt")
+        if not token or not salt:
+            return ""
+
+        used_cached_master = bool(self._master_password_cache)
+        master = self._ask_master_password(confirm=False)
+        if master is None:
+            return None
+
+        try:
+            return decrypt_with_master(master, token, salt)
+        except Exception:
+            if used_cached_master:
+                self._master_password_cache = ""
+                master = self._ask_master_password(confirm=False)
+                if master is None:
+                    return None
+                try:
+                    return decrypt_with_master(master, token, salt)
+                except Exception:
+                    pass
+
+        self._master_password_cache = ""
+        QMessageBox.critical(self, t("login.err_title"), t("login.err_master_wrong"))
+        return None
 
     def pick_key(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, t("login.ssh_key") if t("login.ssh_key") != "[login.ssh_key]" else "SSH Anahtar Seç")
@@ -693,7 +729,7 @@ class LoginWidget(QWidget):
             if plain:
                 master = self._ask_master_password(confirm=True)
                 if master is None:
-                    return
+                    return False
                 enc = encrypt_with_master(master, plain)
                 prof["password_enc"] = enc.token
                 prof["password_salt"] = enc.salt
@@ -737,13 +773,8 @@ class LoginWidget(QWidget):
             if name:
                 prof = next((p for p in load_profiles() if p.get("name") == name), None)
                 if prof and prof.get("save_password") and prof.get("password_enc") and prof.get("password_salt"):
-                    master = self._ask_master_password(confirm=False)
-                    if master is None:
-                        return False
-                    try:
-                        password = decrypt_with_master(master, prof["password_enc"], prof["password_salt"])
-                    except Exception:
-                        QMessageBox.critical(self, t("login.err_title"), t("login.err_master_wrong"))
+                    password = self._decrypt_saved_password(prof)
+                    if password is None:
                         return False
 
         cfg = SSHConfig(
