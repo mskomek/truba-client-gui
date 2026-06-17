@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLineEdit,
     QMessageBox,
@@ -17,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from truba_gui.core.i18n import t
+from truba_gui.config.system_profile import normalize_system_settings
 
 ProfileData = dict[str, Any]
 
@@ -46,6 +48,15 @@ class ConnectionDialog(QDialog):
         self.password.setEchoMode(QLineEdit.EchoMode.Password)
 
         self.cb_save_password = QCheckBox(t("login.save_password"))
+        self.cb_edit_only_password = QCheckBox(
+            t("connection.password_edit_only")
+        )
+        self.cb_edit_only_password.setToolTip(
+            t("connection.password_edit_only_tip")
+        )
+        self.cb_save_password.toggled.connect(
+            self.cb_edit_only_password.setEnabled
+        )
         self.key_path = QLineEdit()
         self.btn_browse_key = QPushButton(t("login.browse"))
         self.btn_browse_key.clicked.connect(self.pick_key)
@@ -60,6 +71,7 @@ class ConnectionDialog(QDialog):
         form.addRow(t("login.username"), self.username)
         form.addRow(t("login.password"), self.password)
         form.addRow("", self.cb_save_password)
+        form.addRow("", self.cb_edit_only_password)
 
         key_row = QHBoxLayout()
         key_row.addWidget(self.key_path)
@@ -68,6 +80,39 @@ class ConnectionDialog(QDialog):
 
         form.addRow("", self.cb_x11)
         form.addRow("", self.cb_strict_hostkey)
+
+        self.system_name = QLineEdit()
+        self.scratch_dir = QLineEdit()
+        self.home_dir = QLineEdit()
+        self.squeue_command = QLineEdit()
+        self.sbatch_command = QLineEdit()
+        self.scancel_command = QLineEdit()
+        self.sacct_command = QLineEdit()
+        self.scontrol_command = QLineEdit()
+        self.status_command = QLineEdit()
+        self.active_job_ids_command = QLineEdit()
+        self.job_state_command = QLineEdit()
+
+        system_form = QFormLayout()
+        system_form.addRow(t("connection.system_name"), self.system_name)
+        system_form.addRow(t("connection.scratch_dir"), self.scratch_dir)
+        system_form.addRow(t("connection.home_dir"), self.home_dir)
+        system_form.addRow(t("connection.squeue_command"), self.squeue_command)
+        system_form.addRow(t("connection.sbatch_command"), self.sbatch_command)
+        system_form.addRow(t("connection.scancel_command"), self.scancel_command)
+        system_form.addRow(t("connection.sacct_command"), self.sacct_command)
+        system_form.addRow(t("connection.scontrol_command"), self.scontrol_command)
+        system_form.addRow(t("connection.status_command"), self.status_command)
+        system_form.addRow(
+            t("connection.active_job_ids_command"),
+            self.active_job_ids_command,
+        )
+        system_form.addRow(
+            t("connection.job_state_command"),
+            self.job_state_command,
+        )
+        system_group = QGroupBox(t("connection.system_settings"))
+        system_group.setLayout(system_form)
 
         self.btn_save = QPushButton(t("connection.save"))
         self.btn_save.clicked.connect(self._save_clicked)
@@ -86,6 +131,7 @@ class ConnectionDialog(QDialog):
 
         root = QVBoxLayout(self)
         root.addLayout(form)
+        root.addWidget(system_group)
         root.addLayout(button_row)
 
         self._load_profile(self._initial_profile)
@@ -99,6 +145,23 @@ class ConnectionDialog(QDialog):
         self.cb_x11.setChecked(bool(profile.get("x11_forwarding", False)))
         self.cb_strict_hostkey.setChecked((profile.get("host_key_policy") or "accept-new") == "strict")
         self.cb_save_password.setChecked(bool(profile.get("save_password", False)))
+        self.cb_edit_only_password.setEnabled(self.cb_save_password.isChecked())
+        self.cb_edit_only_password.setChecked(
+            (profile.get("password_prompt_policy") or "when-needed") == "edit-only"
+        )
+
+        system = normalize_system_settings(profile.get("system"))
+        self.system_name.setText(system["name"])
+        self.scratch_dir.setText(system["scratch_dir"])
+        self.home_dir.setText(system["home_dir"])
+        self.squeue_command.setText(system["squeue_command"])
+        self.sbatch_command.setText(system["sbatch_command"])
+        self.scancel_command.setText(system["scancel_command"])
+        self.sacct_command.setText(system["sacct_command"])
+        self.scontrol_command.setText(system["scontrol_command"])
+        self.status_command.setText(system["status_command"])
+        self.active_job_ids_command.setText(system["active_job_ids_command"])
+        self.job_state_command.setText(system["job_state_command"])
 
         if profile.get("save_password") and isinstance(profile.get("password"), str) and profile.get("password"):
             self.password.setText(str(profile.get("password", "")))
@@ -127,6 +190,24 @@ class ConnectionDialog(QDialog):
             "host_key_policy": "strict" if self.cb_strict_hostkey.isChecked() else "accept-new",
             "x11_forwarding": self.cb_x11.isChecked(),
             "save_password": self.cb_save_password.isChecked(),
+            "password_prompt_policy": (
+                "edit-only"
+                if self.cb_edit_only_password.isChecked()
+                else "when-needed"
+            ),
+            "system": {
+                "name": self.system_name.text().strip(),
+                "scratch_dir": self.scratch_dir.text().strip(),
+                "home_dir": self.home_dir.text().strip(),
+                "squeue_command": self.squeue_command.text().strip(),
+                "sbatch_command": self.sbatch_command.text().strip(),
+                "scancel_command": self.scancel_command.text().strip(),
+                "sacct_command": self.sacct_command.text().strip(),
+                "scontrol_command": self.scontrol_command.text().strip(),
+                "status_command": self.status_command.text().strip(),
+                "active_job_ids_command": self.active_job_ids_command.text().strip(),
+                "job_state_command": self.job_state_command.text().strip(),
+            },
         }
 
     def _save_clicked(self) -> None:

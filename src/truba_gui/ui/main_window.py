@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QMenu, QToolButton, QWidget, QSizePolicy, QHBoxLayout, QLabel
 )
 from PySide6.QtGui import QAction, QIcon, QPixmap, QPainter, QColor
-from PySide6.QtCore import QObject, QThread, QTimer, Qt, QSize, Signal, Slot
+from PySide6.QtCore import QObject, QThread, QThreadPool, QTimer, Qt, QSize, Signal, Slot
 from PySide6.QtSvg import QSvgRenderer
 
 from truba_gui import __version__
@@ -28,6 +28,7 @@ from .widgets.logs_widget import LogsWidget
 from .dialogs.help_dialog import HelpDialog
 from .dialogs.settings_dialog import SettingsDialog
 from .dialogs.quick_tour import QuickTourOverlay
+from .async_call import AsyncCall
 
 
 class _BackgroundCall(QObject):
@@ -93,6 +94,8 @@ class MainWindow(QMainWindow):
         self._update_progress: QProgressDialog | None = None
         self._update_manual = False
         self._update_interactive = False
+        self._job_poll_worker: AsyncCall | None = None
+        self._job_poll_generation = 0
         self._init_language_menu()
         self.retranslate_ui()
 
@@ -110,12 +113,16 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.directories, t("tabs.directories"))
         self.tabs.addTab(self.editor, t("tabs.editor"))
         self.tabs.addTab(self.logs, t("tabs.logs") if t("tabs.logs") != "[tabs.logs]" else "Logs")
+        self.tabs.currentChanged.connect(self._sync_command_polling)
+        self.jobs_outputs.polling_visibility_changed.connect(
+            self._sync_command_polling
+        )
 
         self.login.session_changed.connect(self.on_session_changed)
 
         # Job completion monitor
         self.job_timer = QTimer(self)
-        self.job_timer.setInterval(5000)
+        self.job_timer.setInterval(15000)
         self.job_timer.timeout.connect(self._poll_jobs)
         self._last_job_ids = set()
         self._job_monitor_initialized = False
@@ -127,6 +134,7 @@ class MainWindow(QMainWindow):
                 tray_icon = QApplication.windowIcon()
             self._job_tray.setIcon(tray_icon)
             self._job_tray.show()
+        self._sync_command_polling()
 
         self.jobs_outputs.request_show_directories.connect(self.show_directories)
         self.directories.open_in_editor.connect(self.open_in_editor)
@@ -148,6 +156,8 @@ class MainWindow(QMainWindow):
             try:
                 if hasattr(self, "job_timer") and self.job_timer:
                     self.job_timer.stop()
+                self._job_poll_generation += 1
+                self._job_poll_worker = None
                 if getattr(self, "_job_tray", None):
                     self._job_tray.hide()
             except Exception:
@@ -512,17 +522,32 @@ class MainWindow(QMainWindow):
                     pass
 
     def on_session_changed(self, session):
+        self._job_poll_generation += 1
+        self._job_poll_worker = None
         self._session = session
         self._last_job_ids = set()
         self._job_monitor_initialized = False
-        if session and session.get("connected"):
+        self.jobs_outputs.set_session(session)
+        self.directories.set_session(session)
+        self.editor.set_session(session)
+        self._sync_command_polling()
+
+    def _sync_command_polling(self, _index: int = -1) -> None:
+        if not hasattr(self, "tabs") or not hasattr(self, "jobs_outputs"):
+            return
+        page_active = self.tabs.currentWidget() is self.jobs_outputs
+        self.jobs_outputs.set_page_active(page_active)
+        session = getattr(self, "_session", None)
+        should_poll_jobs = bool(
+            session
+            and session.get("connected")
+            and self.jobs_outputs.is_details_polling_visible()
+        )
+        if should_poll_jobs:
             self.job_timer.start()
             self._poll_jobs()
         else:
             self.job_timer.stop()
-        self.jobs_outputs.set_session(session)
-        self.directories.set_session(session)
-        self.editor.set_session(session)
 
     def show_directories(self):
         idx = self.tabs.indexOf(self.directories)
@@ -546,43 +571,75 @@ class MainWindow(QMainWindow):
             pass
 
     def _poll_jobs(self):
-        # Called every 5s when connected; logs finished jobs to login console
+        # Runs periodically while Job Details is visible; reports finished jobs.
+        if not self.jobs_outputs.is_details_polling_visible():
+            self.job_timer.stop()
+            return
+        if self._job_poll_worker is not None:
+            return
         session = getattr(self, "_session", None)
         if not session or not session.get("connected"):
             return
         ssh = session.get("ssh")
+        slurm = session.get("slurm")
         cfg = session.get("cfg")
-        if not ssh or not cfg:
+        if not ssh or not slurm or not cfg:
             return
-        try:
-            # Get active job ids
-            code, out, err = ssh.run(f'squeue -h -u {cfg.username} -o "%A"')
-            job_ids = set([ln.strip() for ln in out.splitlines() if ln.strip().isdigit()])
-        except Exception:
-            return
-        if not self._job_monitor_initialized:
+        previous_ids = set(self._last_job_ids)
+        initialized = self._job_monitor_initialized
+        generation = self._job_poll_generation
+
+        def fetch():
+            out = slurm.active_job_ids(cfg.username)
+            job_ids = {
+                line.strip()
+                for line in out.splitlines()
+                if line.strip().isdigit()
+            }
+            states = {}
+            if initialized:
+                for jid in previous_ids - job_ids:
+                    try:
+                        state_out = slurm.job_state(jid)
+                        states[jid] = next(
+                            (
+                                line.split("|", 1)[0].strip().split("+", 1)[0]
+                                for line in state_out.splitlines()
+                                if line.strip()
+                            ),
+                            "",
+                        )
+                    except Exception:
+                        states[jid] = ""
+            return job_ids, states
+
+        worker = AsyncCall(generation, fetch)
+        self._job_poll_worker = worker
+
+        def failed(token, _exc) -> None:
+            if self._job_poll_worker is worker:
+                self._job_poll_worker = None
+
+        def finished(token, result) -> None:
+            if self._job_poll_worker is worker:
+                self._job_poll_worker = None
+            if token != self._job_poll_generation:
+                return
+            job_ids, states = result
+            if not self._job_monitor_initialized:
+                self._last_job_ids = job_ids
+                self._job_monitor_initialized = True
+                return
+            self._show_finished_jobs(states)
             self._last_job_ids = job_ids
-            self._job_monitor_initialized = True
-            return
-        # detect finished
-        finished = self._last_job_ids - job_ids
-        for jid in sorted(finished):
-            state = ""
-            try:
-                code, out, err = ssh.run(
-                    f'sacct -n -X -j {jid} -o State -P'
-                )
-                if code == 0:
-                    state = next(
-                        (
-                            line.split("|", 1)[0].strip().split("+", 1)[0]
-                            for line in out.splitlines()
-                            if line.strip()
-                        ),
-                        "",
-                    )
-            except Exception:
-                pass
+
+        worker.signals.failed.connect(failed)
+        worker.signals.finished.connect(finished)
+        QThreadPool.globalInstance().start(worker)
+
+    def _show_finished_jobs(self, states: dict[str, str]) -> None:
+        for jid in sorted(states):
+            state = states[jid]
             if state == "COMPLETED":
                 message = t("login.job_completed").format(jobid=jid)
             elif state:
@@ -597,7 +654,6 @@ class MainWindow(QMainWindow):
                     QSystemTrayIcon.MessageIcon.Information,
                     8000,
                 )
-        self._last_job_ids = job_ids
 
     def closeEvent(self, event):
         """Gracefully stop background helper processes on app exit.

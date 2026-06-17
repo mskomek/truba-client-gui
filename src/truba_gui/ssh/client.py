@@ -99,7 +99,7 @@ def _sanitize_terminal_text(text: str) -> str:
 class SSHConnInfo:
     host: str
     port: int
-    username: str
+    username: str = ""
     password: str = ""
     key_path: str = ""
     host_key_policy: str = "accept-new"  # accept-new | strict
@@ -151,7 +151,8 @@ class SSHClientWrapper:
         info = info or self.info
         if info is None:
             raise ValueError('SSH connection info not provided')
-        self.log(f"SSH: connecting to {info.username}@{info.host}:{info.port} ...")
+        target = f"{info.username}@{info.host}" if info.username else info.host
+        self.log(f"SSH: connecting to {target}:{info.port} ...")
         self.client = paramiko.SSHClient()
         policy = (getattr(info, "host_key_policy", "accept-new") or "accept-new").strip().lower()
         if policy == "strict":
@@ -171,7 +172,7 @@ class SSHClientWrapper:
             self.client.connect(
                 hostname=info.host,
                 port=info.port,
-                username=info.username,
+                username=info.username or None,
                 pkey=pkey,
                 timeout=15,
                 banner_timeout=30,
@@ -184,8 +185,8 @@ class SSHClientWrapper:
             self.client.connect(
                 hostname=info.host,
                 port=info.port,
-                username=info.username,
-                password=info.password,
+                username=info.username or None,
+                password=info.password or None,
                 timeout=15,
                 banner_timeout=30,
                 auth_timeout=30,
@@ -379,7 +380,13 @@ class SSHClientWrapper:
             self.client = None
         self.log("SSH: closed")
 
-    def run(self, command: str, *, timeout_s: Optional[float] = None) -> Tuple[int, str, str]:
+    def run(
+        self,
+        command: str,
+        *,
+        timeout_s: Optional[float] = None,
+        log_output: bool = True,
+    ) -> Tuple[int, str, str]:
         if not self.client:
             raise RuntimeError("SSH client not connected")
         t0 = timed()
@@ -405,9 +412,9 @@ class SSHClientWrapper:
             err = ""
             code = 124
             timed_out = True
-        if out.strip():
+        if log_output and out.strip():
             self.log(_sanitize_terminal_text(out).rstrip("\n"))
-        if err.strip():
+        if log_output and err.strip():
             self.log("STDERR:\n" + _sanitize_terminal_text(err).rstrip("\n"))
         dt = timed() - t0
         if timed_out:

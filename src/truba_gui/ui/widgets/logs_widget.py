@@ -12,6 +12,7 @@ class LogsWidget(QWidget):
     def __init__(self):
         super().__init__()
         self.setObjectName("LogsWidget")
+        self._last_signature = None
 
         self.lbl = QLabel(t("logs.title") if t("logs.title") != "[logs.title]" else "Logs")
         self.txt = QTextEdit()
@@ -45,9 +46,15 @@ class LogsWidget(QWidget):
         self._timer = QTimer(self)
         self._timer.setInterval(1500)
         self._timer.timeout.connect(self.refresh)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self.refresh()
         self._timer.start()
 
-        self.refresh()
+    def hideEvent(self, event) -> None:
+        self._timer.stop()
+        super().hideEvent(event)
 
     def retranslate_ui(self) -> None:
         self.lbl.setText(t("logs.title"))
@@ -62,7 +69,14 @@ class LogsWidget(QWidget):
             self.txt.setPlainText(t("logs.not_created").format(path=str(p)))
             return
         try:
-            data = p.read_text(encoding="utf-8", errors="replace")
+            stat = p.stat()
+            signature = (stat.st_size, stat.st_mtime_ns)
+            if signature == self._last_signature:
+                return
+            self._last_signature = signature
+            with p.open("rb") as stream:
+                stream.seek(max(0, stat.st_size - 16384))
+                data = stream.read().decode("utf-8", errors="replace")
         except Exception as e:
             self.txt.setPlainText(t("logs.read_failed").format(err=str(e)))
             return

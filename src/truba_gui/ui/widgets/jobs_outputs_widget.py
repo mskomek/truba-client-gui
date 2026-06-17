@@ -4,7 +4,7 @@ import html
 import re
 import shlex
 
-from PySide6.QtCore import QTimer, Signal
+from PySide6.QtCore import QThreadPool, QTimer, Signal
 from PySide6.QtGui import QFontDatabase, QTextCursor
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QPushButton, QTextEdit,
@@ -24,6 +24,8 @@ from truba_gui.services.slurm_script_parser import (
     parse_output_error,
     resolve_path,
 )
+from truba_gui.config.system_profile import format_remote_path, normalize_system_settings
+from truba_gui.ui.async_call import AsyncCall
 
 
 _ANSI_TOKEN_RE = re.compile(
@@ -90,16 +92,21 @@ def _ansi_to_html(text: str) -> str:
 
 class JobsOutputsWidget(QWidget):
     request_show_directories = Signal()
+    polling_visibility_changed = Signal()
 
     def __init__(self):
         super().__init__()
         self.session = None
+        self._page_active = True
 
         self.active_script: str = ""
         self.active_out: str = ""
         self.active_err: str = ""
         self._last_sig = [None, None]  # (size,mtime) for out/err
         self._tail_paused = False
+        self._async_workers: set[AsyncCall] = set()
+        self._async_busy: dict[str, int] = {}
+        self._session_generation = 0
 
         self.section_tabs = QTabWidget(self)
         self.details_tab = QWidget(self.section_tabs)
@@ -172,6 +179,8 @@ class JobsOutputsWidget(QWidget):
         self.scratch_panel.open_file.connect(self.load_one_file)  # double click
         self.scratch_panel.enable_output_menu = True
         self.scratch_panel.open_in_slot.connect(self.open_in_output_slot)
+        self.btn_files_refresh = QPushButton()
+        self.btn_files_refresh.clicked.connect(self.scratch_panel.refresh)
 
         details_layout = QVBoxLayout(self.details_tab)
         details_layout.addWidget(self.jobs_box)
@@ -179,6 +188,10 @@ class JobsOutputsWidget(QWidget):
         details_layout.addWidget(self.lssrv_box, 2)
 
         files_layout = QVBoxLayout(self.files_tab)
+        files_refresh_row = QHBoxLayout()
+        files_refresh_row.addWidget(self.btn_files_refresh)
+        files_refresh_row.addStretch(1)
+        files_layout.addLayout(files_refresh_row)
         files_layout.addWidget(self.scratch_panel)
 
         # --- Outputs group (2 panels)
@@ -252,6 +265,9 @@ class JobsOutputsWidget(QWidget):
         self.section_tabs.addTab(self.files_tab, "")
         self.section_tabs.addTab(self.outputs_tab, "")
         self.section_tabs.setCurrentIndex(0)
+        self.section_tabs.currentChanged.connect(
+            self._on_section_tab_changed
+        )
         self.retranslate_ui()
 
     @staticmethod
@@ -264,6 +280,8 @@ class JobsOutputsWidget(QWidget):
         )
 
     def set_session(self, session):
+        self._session_generation += 1
+        self._async_busy.clear()
         self.session = session
         self.jobs_text.setPlainText("")
         self.txt_out.setPlainText("")
@@ -288,12 +306,64 @@ class JobsOutputsWidget(QWidget):
 
         cfg = session.get("cfg")
         user = getattr(cfg, "username", "") if cfg else ""
+        system = normalize_system_settings(
+            getattr(cfg, "system_settings", None) if cfg else None
+        )
+        scratch_dir = format_remote_path(system["scratch_dir"], user)
         self.scratch_panel.set_session(session)
-        self.scratch_panel.set_dir(f"/arf/scratch/{user}" if user else "/arf/scratch")
-        self.refresh_jobs()
-        self.refresh_sacct()
-        self.refresh_lssrv()
-        self._jobs_refresh_timer.start()
+        self.scratch_panel.title = scratch_dir
+        self.scratch_panel.lbl.setText(scratch_dir)
+        self.scratch_panel.set_dir(scratch_dir)
+        self._sync_polling(immediate=True)
+
+    def set_page_active(self, active: bool) -> None:
+        active = bool(active)
+        if self._page_active == active:
+            return
+        self._page_active = active
+        self._sync_polling(immediate=active)
+        self.polling_visibility_changed.emit()
+
+    def is_details_polling_visible(self) -> bool:
+        return bool(
+            self._page_active
+            and self.section_tabs.currentWidget() is self.details_tab
+        )
+
+    def is_outputs_polling_visible(self) -> bool:
+        return bool(
+            self._page_active
+            and self.section_tabs.currentWidget() is self.outputs_tab
+        )
+
+    def _on_section_tab_changed(self, _index: int) -> None:
+        self._sync_polling(immediate=True)
+        self.polling_visibility_changed.emit()
+
+    def _sync_polling(self, *, immediate: bool = False) -> None:
+        connected = bool(self.session and self.session.get("connected"))
+        if connected and self.is_details_polling_visible():
+            self._jobs_refresh_timer.start()
+            if immediate:
+                self.refresh_jobs()
+                self.refresh_sacct()
+                self.refresh_lssrv()
+        else:
+            self._jobs_refresh_timer.stop()
+
+        should_tail = bool(
+            connected
+            and self.is_outputs_polling_visible()
+            and not self._tail_paused
+            and (self.active_out or self.active_err)
+        )
+        if should_tail:
+            self._apply_live_refresh_interval()
+            self._live_timer.start()
+            if immediate:
+                self._poll_live()
+        else:
+            self._live_timer.stop()
 
     def shutdown(self) -> None:
         """Stop timers / live watchers (best-effort)."""
@@ -302,21 +372,71 @@ class JobsOutputsWidget(QWidget):
                 self._live_timer.stop()
             if hasattr(self, "_jobs_refresh_timer") and self._jobs_refresh_timer:
                 self._jobs_refresh_timer.stop()
+            self._session_generation += 1
+            self._async_busy.clear()
         except Exception:
             pass
+
+    def _start_async(
+        self,
+        key: str,
+        fn,
+        on_success,
+        *,
+        on_error=None,
+    ) -> bool:
+        if key in self._async_busy:
+            return False
+        generation = self._session_generation
+        token = (key, generation)
+        worker = AsyncCall(token, fn)
+        self._async_busy[key] = generation
+        self._async_workers.add(worker)
+
+        def finished(current_token, result) -> None:
+            self._async_workers.discard(worker)
+            if self._async_busy.get(key) == generation:
+                self._async_busy.pop(key, None)
+            if current_token != (key, self._session_generation):
+                return
+            on_success(result)
+
+        def failed(current_token, exc) -> None:
+            self._async_workers.discard(worker)
+            if self._async_busy.get(key) == generation:
+                self._async_busy.pop(key, None)
+            if current_token != (key, self._session_generation):
+                return
+            if on_error is not None:
+                on_error(exc)
+
+        worker.signals.finished.connect(finished)
+        worker.signals.failed.connect(failed)
+        QThreadPool.globalInstance().start(worker)
+        return True
 
     # ---------------- Jobs
     def refresh_jobs(self):
         if not self.session or not self.session.get("slurm"):
             return
         user = self.session["cfg"].username
-        try:
-            txt = self.session["slurm"].squeue(user)
-        except Exception as e:
+        slurm = self.session["slurm"]
+
+        def success(txt) -> None:
+            if not self.is_details_polling_visible():
+                return
+            self.jobs_text.setPlainText(txt)
+            append_event({"type": "squeue", "user": user})
+
+        def failed(e) -> None:
             show_exception(self, title=t("common.error"), user_message=str(e), exc=e, area="JOBS")
-            return
-        self.jobs_text.setPlainText(txt)
-        append_event({"type": "squeue", "user": user})
+
+        self._start_async(
+            "squeue",
+            lambda: slurm.squeue(user),
+            success,
+            on_error=failed,
+        )
 
     def cancel_job(self):
         if not self.session or not self.session.get("slurm"):
@@ -324,25 +444,43 @@ class JobsOutputsWidget(QWidget):
         jobid = self.cancel_id.text().strip()
         if not jobid:
             return
-        try:
-            res = self.session["slurm"].scancel(jobid)
-        except Exception as e:
+        slurm = self.session["slurm"]
+
+        def success(res) -> None:
+            self.jobs_text.append("\n" + res)
+            append_event({"type": "scancel", "jobid": jobid})
+
+        def failed(e) -> None:
             show_exception(self, title=t("common.error"), user_message=str(e), exc=e, area="JOBS")
-            return
-        self.jobs_text.append("\n" + res)
-        append_event({"type": "scancel", "jobid": jobid})
+
+        self._start_async(
+            "scancel",
+            lambda: slurm.scancel(jobid),
+            success,
+            on_error=failed,
+        )
 
     def refresh_sacct(self):
         if not self.session or not self.session.get("slurm"):
             return
         user = self.session["cfg"].username
-        try:
-            txt = self.session["slurm"].sacct(user)
-        except Exception as e:
+        slurm = self.session["slurm"]
+
+        def success(txt) -> None:
+            if not self.is_details_polling_visible():
+                return
+            self.meta_text.setPlainText(txt)
+            append_event({"type": "sacct", "user": user})
+
+        def failed(e) -> None:
             show_exception(self, title=t("common.error"), user_message=str(e), exc=e, area="JOBS")
-            return
-        self.meta_text.setPlainText(txt)
-        append_event({"type": "sacct", "user": user})
+
+        self._start_async(
+            "sacct",
+            lambda: slurm.sacct(user),
+            success,
+            on_error=failed,
+        )
 
     def show_job_details(self):
         if not self.session or not self.session.get("slurm"):
@@ -353,13 +491,21 @@ class JobsOutputsWidget(QWidget):
                 self, t("common.info"), t("jobs_outputs.job_id_required")
             )
             return
-        try:
-            txt = self.session["slurm"].scontrol_show_job(jobid)
-        except Exception as e:
+        slurm = self.session["slurm"]
+
+        def success(txt) -> None:
+            self.meta_text.setPlainText(txt)
+            append_event({"type": "scontrol_show_job", "jobid": jobid})
+
+        def failed(e) -> None:
             show_exception(self, title=t("common.error"), user_message=str(e), exc=e, area="JOBS")
-            return
-        self.meta_text.setPlainText(txt)
-        append_event({"type": "scontrol_show_job", "jobid": jobid})
+
+        self._start_async(
+            "scontrol",
+            lambda: slurm.scontrol_show_job(jobid),
+            success,
+            on_error=failed,
+        )
 
     def refresh_lssrv(self):
         if (
@@ -368,11 +514,18 @@ class JobsOutputsWidget(QWidget):
             or not self.session.get("slurm")
         ):
             return
-        append_event({"type": "lssrv", "status": "attempt"})
-        self.lssrv_text.setPlainText("")
-        try:
-            txt = self.session["slurm"].lssrv()
-        except Exception as e:
+        slurm = self.session["slurm"]
+
+        def success(txt) -> None:
+            if not self.is_details_polling_visible():
+                return
+            if txt:
+                self.lssrv_text.setHtml(_ansi_to_html(txt))
+            else:
+                self.lssrv_text.setPlainText(t("jobs_outputs.lssrv_empty"))
+            append_event({"type": "lssrv", "status": "success"})
+
+        def failed(e) -> None:
             append_event({"type": "lssrv", "status": "failed", "error": str(e)})
             self.lssrv_text.setPlainText(t("jobs_outputs.lssrv_failed"))
             show_exception(
@@ -382,12 +535,14 @@ class JobsOutputsWidget(QWidget):
                 exc=e,
                 area="JOBS",
             )
-            return
-        if txt:
-            self.lssrv_text.setHtml(_ansi_to_html(txt))
-        else:
-            self.lssrv_text.setPlainText(t("jobs_outputs.lssrv_empty"))
-        append_event({"type": "lssrv", "status": "success"})
+
+        if self._start_async(
+            "lssrv",
+            slurm.lssrv,
+            success,
+            on_error=failed,
+        ):
+            append_event({"type": "lssrv", "status": "attempt"})
 
     def focus_job(self, jobid: str, script_path: str = ""):
         """Focus a submitted job in the jobs UI and optionally bind outputs from script."""
@@ -430,9 +585,7 @@ class JobsOutputsWidget(QWidget):
             self._last_sig[1] = None
             self.txt_err.setPlainText("")
         self.section_tabs.setCurrentWidget(self.outputs_tab)
-        self._apply_live_refresh_interval()
-        self._live_timer.start()
-        self._poll_live()
+        self._sync_polling(immediate=True)
         append_event({"type": "open_watch", "slot": slot+1, "path": remote_path})
 
     def _activate_slurm_script(self, script_path: str):
@@ -470,11 +623,21 @@ class JobsOutputsWidget(QWidget):
         interval_ms = max(1000, get_jobs_outputs_refresh_interval_seconds() * 1000)
         self._jobs_refresh_timer.setInterval(interval_ms)
         self._apply_live_refresh_interval()
-        if self.session and self.session.get("connected"):
+        if (
+            self.session
+            and self.session.get("connected")
+            and self.is_details_polling_visible()
+        ):
             self._jobs_refresh_timer.start()
+        else:
+            self._jobs_refresh_timer.stop()
 
     def _poll_jobs_and_lssrv(self) -> None:
-        if not self.session or not self.session.get("connected"):
+        if (
+            not self.session
+            or not self.session.get("connected")
+            or not self.is_details_polling_visible()
+        ):
             self._jobs_refresh_timer.stop()
             return
         self.apply_refresh_settings()
@@ -496,10 +659,7 @@ class JobsOutputsWidget(QWidget):
         if self._tail_paused:
             self._live_timer.stop()
             return
-        if self.active_out or self.active_err:
-            self._apply_live_refresh_interval()
-            self._live_timer.start()
-            self._poll_live()
+        self._sync_polling(immediate=True)
 
     def _find_in_output(self, slot: int) -> None:
         search = self.search_out if slot == 0 else self.search_err
@@ -521,7 +681,8 @@ class JobsOutputsWidget(QWidget):
         scrollbar.setValue(scrollbar.maximum())
 
     def _poll_live(self):
-        if self._tail_paused:
+        if self._tail_paused or not self.is_outputs_polling_visible():
+            self._live_timer.stop()
             return
         if not self.session:
             self._live_timer.stop()
@@ -533,93 +694,59 @@ class JobsOutputsWidget(QWidget):
             self._live_timer.stop()
             return
 
-        job_state = None
-
-        def current_job_state() -> str:
-            nonlocal job_state
-            if job_state is not None:
-                return job_state
-            job_state = ""
-            jobid = (self.meta_job_id.text() or self.cancel_id.text()).strip()
-            slurm = self.session.get("slurm")
-            if not jobid or not slurm:
-                return job_state
-            try:
-                details = slurm.scontrol_show_job(jobid)
-                match = re.search(r"\bJobState=([A-Z_]+)", details or "")
-                if match:
-                    job_state = match.group(1)
-            except Exception:
-                pass
-            return job_state
-
-        def missing_file_message(kind: str, error: Exception) -> str:
-            state = current_job_state()
-            if state:
-                return t("jobs_outputs.waiting_for_file").format(
-                    kind=kind,
-                    state=state,
-                )
-            return t("jobs_outputs.waiting_for_file_unknown").format(
-                kind=kind,
-                error=error,
-            )
-
-        def fetch_tail(path: str) -> str:
-            # Prefer SSH tail (efficient). Fallback to read_text (may be heavy).
-            if ssh:
-                try:
-                    code, out, err = ssh.run(
-                        f"tail -n {_LIVE_TAIL_LINE_COUNT} -- {shlex.quote(path)}"
-                    )
-                    if code == 0:
-                        return out
-                except Exception:
-                    pass
-            # fallback
-            try:
-                txt = files.read_text(path)
-                lines = txt.splitlines()[-_LIVE_TAIL_LINE_COUNT:]
-                return "\n".join(lines) + ("\n" if lines else "")
-            except Exception as e:
-                return f"(Dosya okunamadı: {e})"
-
-        # output
-        if self.active_out:
-            try:
-                sig = files.stat(self.active_out)
-            except Exception as e:
-                self._set_live_text(
-                    self.txt_out,
-                    missing_file_message(t("jobs_outputs.output_kind"), e),
-                )
-                sig = None
-            if sig:
-                self._last_sig[0] = sig
-                self._set_live_text(
-                    self.txt_out,
-                    fetch_tail(self.active_out),
-                )
-
-        # error
-        if self.active_err:
-            try:
-                sig = files.stat(self.active_err)
-            except Exception as e:
-                self._set_live_text(
-                    self.txt_err,
-                    missing_file_message(t("jobs_outputs.error_kind"), e),
-                )
-                sig = None
-            if sig:
-                self._last_sig[1] = sig
-                self._set_live_text(
-                    self.txt_err,
-                    fetch_tail(self.active_err),
-                )
-
-        if not self.active_out and not self.active_err:
+        paths = (self.active_out, self.active_err)
+        if not any(paths):
             self._live_timer.stop()
+            return
+
+        def fetch() -> list[tuple[int, str, str, str]]:
+            results = []
+            for slot, path in enumerate(paths):
+                if not path:
+                    continue
+                try:
+                    if ssh:
+                        code, out, err = ssh.run(
+                            f"tail -n {_LIVE_TAIL_LINE_COUNT} -- {shlex.quote(path)}",
+                            log_output=False,
+                        )
+                        if code == 0:
+                            results.append((slot, path, out, ""))
+                            continue
+                        raise RuntimeError(err.strip() or f"exit={code}")
+                    text = files.read_text(path)
+                    lines = text.splitlines()[-_LIVE_TAIL_LINE_COUNT:]
+                    tail = "\n".join(lines) + ("\n" if lines else "")
+                    results.append((slot, path, tail, ""))
+                except Exception as exc:
+                    results.append((slot, path, "", str(exc)))
+            return results
+
+        def success(results) -> None:
+            if not self.is_outputs_polling_visible():
+                return
+            for slot, path, text, error in results:
+                current_path = self.active_out if slot == 0 else self.active_err
+                if path != current_path:
+                    continue
+                widget = self.txt_out if slot == 0 else self.txt_err
+                if error:
+                    kind_key = (
+                        "jobs_outputs.output_kind"
+                        if slot == 0
+                        else "jobs_outputs.error_kind"
+                    )
+                    self._set_live_text(
+                        widget,
+                        t("jobs_outputs.waiting_for_file_unknown").format(
+                            kind=t(kind_key),
+                            error=error,
+                        ),
+                    )
+                else:
+                    self._set_live_text(widget, text)
+
+        self._start_async("tail", fetch, success)
 
     def retranslate_ui(self):
         details_title = f"{t('jobs.title')} / {t('common.details')}"
@@ -643,6 +770,7 @@ class JobsOutputsWidget(QWidget):
         self.btn_sacct.setText(t("jobs_outputs.refresh_sacct"))
         self.btn_scontrol.setText(t("jobs_outputs.show_job_details"))
         self.btn_lssrv.setText(t("jobs_outputs.lssrv_refresh"))
+        self.btn_files_refresh.setText(t("dirs.refresh"))
         self.search_out.setPlaceholderText(t("jobs_outputs.search_placeholder"))
         self.search_err.setPlaceholderText(t("jobs_outputs.search_placeholder"))
         self.btn_search_out.setText(t("jobs_outputs.search_next"))

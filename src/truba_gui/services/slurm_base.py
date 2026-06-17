@@ -18,3 +18,9 @@ class SlurmBackend(ABC):
 
     @abstractmethod
     def lssrv(self) -> str: ...
+
+    @abstractmethod
+    def active_job_ids(self, user: str) -> str: ...
+
+    @abstractmethod
+    def job_state(self, job_id: str) -> str: ...

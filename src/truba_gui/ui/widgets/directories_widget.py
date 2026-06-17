@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 from truba_gui.core.i18n import t
 from truba_gui.core.ui_errors import show_exception
 from truba_gui.core.history import append_event
+from truba_gui.config.system_profile import format_remote_path, normalize_system_settings
 from truba_gui.ui.widgets.remote_dir_panel import RemoteDirPanel
 
 
@@ -82,8 +83,17 @@ class DirectoriesWidget(QWidget):
         if not session or not session.get("connected"):
             return
         user = session["cfg"].username or "user"
-        self.panel_scratch.set_dir(f"/arf/scratch/{user}")
-        self.panel_home.set_dir(f"/arf/home/{user}")
+        system = normalize_system_settings(
+            getattr(session["cfg"], "system_settings", None)
+        )
+        scratch_dir = format_remote_path(system["scratch_dir"], user)
+        home_dir = format_remote_path(system["home_dir"], user)
+        self.panel_scratch.title = scratch_dir
+        self.panel_scratch.lbl.setText(scratch_dir)
+        self.panel_home.title = home_dir
+        self.panel_home.lbl.setText(home_dir)
+        self.panel_scratch.set_dir(scratch_dir)
+        self.panel_home.set_dir(home_dir)
 
     def retranslate_ui(self):
         self.btn_new_slurm.setText(
@@ -196,7 +206,10 @@ class DirectoriesWidget(QWidget):
         if not default_dir:
             cfg = self.session.get("cfg") if self.session else None
             user = getattr(cfg, "username", "") or "user"
-            default_dir = f"/arf/scratch/{user}"
+            system = normalize_system_settings(
+                getattr(cfg, "system_settings", None)
+            )
+            default_dir = format_remote_path(system["scratch_dir"], user)
 
         name, ok = QInputDialog.getText(
             self,

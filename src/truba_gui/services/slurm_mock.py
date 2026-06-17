@@ -33,3 +33,9 @@ class MockSlurmBackend(SlurmBackend):
             "node001    available  32   128G\n"
             "node002    busy       64   256G\n"
         )
+
+    def active_job_ids(self, user: str) -> str:
+        return "12345\n12346\n"
+
+    def job_state(self, job_id: str) -> str:
+        return "COMPLETED\n"

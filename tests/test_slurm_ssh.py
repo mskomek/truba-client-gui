@@ -15,7 +15,7 @@ class _FakeSSH:
         self.result = result
         self.commands = []
 
-    def run(self, command: str):
+    def run(self, command: str, **_kwargs):
         self.commands.append(command)
         return self.result
 
@@ -62,6 +62,33 @@ class SSHSlurmBackendTests(unittest.TestCase):
         result = SSHSlurmBackend(ssh).sbatch("/tmp/job.sbatch")
 
         self.assertEqual(result, "[exit=2]")
+
+    def test_custom_system_commands_are_used(self):
+        ssh = _FakeSSH((0, "ok", ""))
+        backend = SSHSlurmBackend(
+            ssh,
+            {
+                "squeue_command": "queue --owner {user}",
+                "status_command": "cluster-status",
+                "active_job_ids_command": "queue-ids {user}",
+                "job_state_command": "job-state {job_id_q}",
+            },
+        )
+
+        backend.squeue("alice")
+        backend.lssrv()
+        backend.active_job_ids("alice")
+        backend.job_state("12 34")
+
+        self.assertEqual(
+            ssh.commands,
+            [
+                "queue --owner alice",
+                "cluster-status",
+                "queue-ids alice",
+                "job-state '12 34'",
+            ],
+        )
 
 
 if __name__ == "__main__":

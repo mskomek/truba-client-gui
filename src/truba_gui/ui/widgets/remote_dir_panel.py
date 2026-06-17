@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from PySide6.QtCore import QEvent, QPoint, Qt, Signal, QObject, QThread, Slot
-from PySide6.QtGui import QDrag, QIcon, QKeyEvent
+from PySide6.QtGui import QDrag, QIcon, QKeyEvent, QKeySequence, QShortcut
 from PySide6.QtCore import QMimeData
 from PySide6.QtWidgets import (
     QApplication,
@@ -337,6 +337,10 @@ class RemoteDirPanel(QWidget):
         self.btn_refresh = QPushButton(t("dirs.refresh") if t("dirs.refresh") != "[dirs.refresh]" else "Yenile")
         self.btn_refresh.clicked.connect(self.refresh)
 
+        self.refresh_shortcut = QShortcut(QKeySequence.Refresh, self)
+        self.refresh_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self.refresh_shortcut.activated.connect(self.refresh)
+
         top = QHBoxLayout()
         top.addWidget(self.lbl)
         top.addStretch(1)
@@ -448,6 +452,9 @@ class RemoteDirPanel(QWidget):
             e: QKeyEvent = event  # type: ignore
             if e.key() == Qt.Key.Key_Delete:
                 self.delete_selected()
+                return True
+            if e.key() == Qt.Key.Key_F5 and not e.modifiers():
+                self.refresh()
                 return True
             if (e.modifiers() & Qt.KeyboardModifier.ControlModifier) and e.key() == Qt.Key.Key_V:
                 if self._paste_system_clipboard_into(self.current_dir or "/"):
@@ -718,7 +725,10 @@ class RemoteDirPanel(QWidget):
 
         selected_items = view.selectedItems()
         selected_entries = self._selected_entries_from_view(view)
-        if not selected_items and clicked_path:
+        if clicked_path and item is not None and not item.isSelected():
+            selected_entries = [(clicked_path, clicked_is_dir)]
+            selected_items = [item]
+        elif not selected_items and clicked_path:
             selected_entries = [(clicked_path, clicked_is_dir)]
         sel_paths = [path for path, _is_dir in selected_entries]
         submit_path = self._submit_candidate(selected_entries) if len(selected_items) <= 1 else ""
@@ -774,7 +784,8 @@ class RemoteDirPanel(QWidget):
             act_paste_to_local = menu.addAction(t("dirs.paste_to_local"))
             menu.addSeparator()
         act_submit = None
-        act_edit = act_download = act_rename = act_copy = act_move = act_delete = None
+        act_edit = act_download = act_rename = act_copy_path = None
+        act_copy = act_move = act_delete = None
         if sel_paths:
             if submit_path:
                 act_submit = menu.addAction(
@@ -787,6 +798,11 @@ class RemoteDirPanel(QWidget):
             act_download = menu.addAction(t("dirs.download") if t("dirs.download") != "[dirs.download]" else "İndir")
             menu.addSeparator()
             act_rename = menu.addAction(t("dirs.rename") if t("dirs.rename") != "[dirs.rename]" else "Yeniden Adlandır")
+            act_copy_path = menu.addAction(
+                t("dirs.copy_path")
+                if t("dirs.copy_path") != "[dirs.copy_path]"
+                else "Dosyayla birlikte yolu kopyala"
+            )
             act_copy = menu.addAction(t("dirs.copy") if t("dirs.copy") != "[dirs.copy]" else "Kopyala")
             act_move = menu.addAction(t("dirs.move") if t("dirs.move") != "[dirs.move]" else "Taşı")
             menu.addSeparator()
@@ -883,6 +899,11 @@ class RemoteDirPanel(QWidget):
                 self.refresh()
             except Exception as e:
                 show_exception(self, title=t("common.error"), user_message=str(e), exc=e, area="FILES")
+            return
+
+        # Copy remote path text to the system clipboard
+        if act_copy_path is not None and chosen == act_copy_path:
+            QApplication.clipboard().setText("\n".join(sel_paths))
             return
 
         # Copy/Move into clipboard

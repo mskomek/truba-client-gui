@@ -11,6 +11,19 @@ from truba_gui.config.storage import get_ui_pref_bool, set_ui_pref_bool
 from truba_gui.ui.dialogs.welcome_dialog import WelcomeDialog
 
 
+def _performance_probe():
+    return sys.modules.get("_truba_gui_perf_probe")
+
+
+def _performance_mark(name: str) -> None:
+    probe = _performance_probe()
+    if probe is not None:
+        try:
+            probe.mark(name)
+        except Exception:
+            pass
+
+
 def _bootstrap_safety_checks() -> None:
     """Best-effort startup guards.
 
@@ -30,7 +43,9 @@ def _bootstrap_safety_checks() -> None:
         pass
 
 def main() -> int:
+    _performance_mark("main_entered")
     app = QApplication(sys.argv)
+    _performance_mark("qapplication_created")
 
     # Logging (file-backed, rotating). Must not crash the GUI.
     setup_logging(level=logging.INFO)
@@ -41,6 +56,7 @@ def main() -> int:
         pass
 
     _bootstrap_safety_checks()
+    _performance_mark("bootstrap_checks_complete")
 
     # Slightly darker neutral background for the whole app (without affecting input widgets).
     app.setStyleSheet(
@@ -51,14 +67,24 @@ def main() -> int:
     )
 
     load_saved_language(system_default_language())
+    _performance_mark("language_loaded")
 
     w = MainWindow()
+    _performance_mark("main_window_created")
     # Crash-safe shutdown: ensure cleanup runs even if window closeEvent is skipped.
     try:
         app.aboutToQuit.connect(w.graceful_shutdown)
     except Exception:
         pass
     w.show()
+    _performance_mark("main_window_shown")
+
+    probe = _performance_probe()
+    if probe is not None:
+        try:
+            probe.attach_to_app(app)
+        except Exception:
+            probe = None
 
     # First-run welcome / guide (user can disable permanently)
     try:
@@ -70,4 +96,10 @@ def main() -> int:
     except Exception:
         pass
 
-    return app.exec()
+    exit_code = app.exec()
+    if probe is not None:
+        try:
+            probe.finish(exit_code)
+        except Exception:
+            pass
+    return exit_code

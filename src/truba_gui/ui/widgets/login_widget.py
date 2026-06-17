@@ -1,17 +1,19 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, QThread, Signal, Qt, QEvent
+from PySide6.QtCore import QObject, QThread, QTimer, Signal, Qt, QEvent
 from PySide6.QtGui import QFontDatabase, QTextCursor
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QFormLayout, QHBoxLayout,
     QLineEdit, QPushButton, QCheckBox, QLabel, QFileDialog,
-    QListWidget, QSplitter, QMessageBox, QPlainTextEdit, QInputDialog, QMenu
+    QApplication, QListWidget, QSplitter, QMessageBox, QPlainTextEdit,
+    QInputDialog, QMenu
 )
 
 from truba_gui.core.i18n import t
 from truba_gui.core.ui_errors import show_exception
 from truba_gui.config.models import SSHConfig
 from truba_gui.config.storage import load_profiles, upsert_profile, load_settings, delete_profile
+from truba_gui.config.system_profile import normalize_system_settings
 from truba_gui.core.history import append_event
 from truba_gui.core.logging import append_log
 from truba_gui.services.slurm_mock import MockSlurmBackend
@@ -21,6 +23,11 @@ from truba_gui.ssh.client import SSHClientWrapper, SSHConnInfo
 from truba_gui.services.files_ssh import SSHFilesBackend
 from truba_gui.services.slurm_ssh import SSHSlurmBackend
 from truba_gui.core.crypto_master import encrypt_with_master, decrypt_with_master
+from truba_gui.core.secret_store import (
+    is_available as os_secret_store_available,
+    protect_secret,
+    unprotect_secret,
+)
 from truba_gui.services.terminal_emulator import TerminalEmulator
 from truba_gui.ui.widgets.terminal_input import TerminalInput
 from truba_gui.ui.dialogs.connection_dialog import ConnectionDialog
@@ -32,15 +39,27 @@ class _TerminalConsole(QPlainTextEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._key_handler = None
+        self._paste_handler = None
 
     def set_key_handler(self, handler) -> None:
         self._key_handler = handler
+
+    def set_paste_handler(self, handler) -> None:
+        self._paste_handler = handler
 
     def keyPressEvent(self, event) -> None:  # type: ignore[override]
         handler = self._key_handler
         if handler is not None and handler(event):
             return
         super().keyPressEvent(event)
+
+    def mousePressEvent(self, event) -> None:  # type: ignore[override]
+        if event.button() == Qt.MouseButton.RightButton:
+            handler = self._paste_handler
+            if handler is not None and handler():
+                event.accept()
+                return
+        super().mousePressEvent(event)
 
 
 class _ConnectionWorker(QObject):
@@ -73,7 +92,12 @@ class _ConnectionWorker(QObject):
                 disconnect_cb=self._disconnect_cb,
             )
             ssh.connect(shell_size=self._shell_size)
-            slurm = SSHSlurmBackend(ssh)
+            transport = ssh.client.get_transport() if ssh.client else None
+            if transport is not None:
+                authenticated_user = transport.get_username() or ""
+                if authenticated_user:
+                    self._cfg.username = authenticated_user
+            slurm = SSHSlurmBackend(ssh, self._cfg.system_settings)
             files = SSHFilesBackend(ssh)
             self.finished.emit({
                 "cfg": self._cfg,
@@ -92,6 +116,7 @@ class LoginWidget(QWidget):
     """
     session_changed = Signal(object)
     console_message = Signal(str)
+    ssh_console_message = Signal(str)
     shell_output_message = Signal(str)
     ssh_disconnected = Signal(str)
 
@@ -116,6 +141,8 @@ class LoginWidget(QWidget):
         self.password.setEchoMode(QLineEdit.EchoMode.Password)
 
         self.cb_save_password = QCheckBox(t("login.save_password") if t("login.save_password") != "[login.save_password]" else "Şifreyi kaydet")
+        self._profile_system_settings = normalize_system_settings(None)
+        self._password_prompt_policy = "when-needed"
         self.key_path = QLineEdit()
         self.btn_browse_key = QPushButton(t("login.browse") if t("login.browse") != "[login.browse]" else "Seç")
         self.btn_browse_key.clicked.connect(self.pick_key)
@@ -151,6 +178,7 @@ class LoginWidget(QWidget):
         self.console.setPlaceholderText(ph)
         self.console.viewport().installEventFilter(self)
         self.console.set_key_handler(self._forward_console_key_event)
+        self.console.set_paste_handler(self._paste_console_clipboard)
 
         # ---- SSH terminal line
         self.cmd_in = TerminalInput()
@@ -222,7 +250,12 @@ class LoginWidget(QWidget):
         self._pending_old_ssh = None
         self._reconnect_prompt_open = False
         self._master_password_cache = ""
+        self._console_render_timer = QTimer(self)
+        self._console_render_timer.setSingleShot(True)
+        self._console_render_timer.setInterval(50)
+        self._console_render_timer.timeout.connect(self._render_console_view)
         self.console_message.connect(self._append_console_to_widget)
+        self.ssh_console_message.connect(self._append_ssh_console_to_widget)
         self.shell_output_message.connect(self._append_shell_output_to_widget)
         self.ssh_disconnected.connect(self._handle_ssh_disconnected)
 
@@ -283,6 +316,16 @@ class LoginWidget(QWidget):
         except RuntimeError:
             pass
 
+    def append_ssh_console(self, msg: str) -> None:
+        try:
+            self.ssh_console_message.emit(msg)
+        except RuntimeError:
+            pass
+
+    def _schedule_console_render(self) -> None:
+        if not self._console_render_timer.isActive():
+            self._console_render_timer.start()
+
     def _render_console_view(self) -> None:
         try:
             lines = list(self._console_log_lines)
@@ -309,7 +352,9 @@ class LoginWidget(QWidget):
     def _append_log_line(self, msg: str) -> None:
         text = (msg or "").rstrip("\n")
         self._console_log_lines.extend(text.splitlines() or [""])
-        self._render_console_view()
+        if len(self._console_log_lines) > 2000:
+            del self._console_log_lines[:-2000]
+        self._schedule_console_render()
 
     def _append_console_to_widget(self, msg: str) -> None:
         # Guard against "Internal C++ object already deleted" during shutdown.
@@ -320,6 +365,13 @@ class LoginWidget(QWidget):
             pass
         append_log(msg)
 
+    def _append_ssh_console_to_widget(self, msg: str) -> None:
+        try:
+            if hasattr(self, "console") and shiboken6.isValid(self.console):
+                self._append_log_line(msg)
+        except RuntimeError:
+            pass
+
     def _append_shell_output_to_widget(self, msg: str) -> None:
         try:
             if not hasattr(self, "console") or not shiboken6.isValid(self.console):
@@ -328,7 +380,7 @@ class LoginWidget(QWidget):
                 self._append_log_line(msg)
                 return
             self._terminal_emulator.feed(msg or "")
-            self._render_console_view()
+            self._schedule_console_render()
         except Exception as exc:
             self._terminal_emulation_enabled = False
             self._append_log_line(f"[terminal emulator disabled: {exc}]")
@@ -396,6 +448,22 @@ class LoginWidget(QWidget):
             pass
         return False
 
+    def _paste_console_clipboard(self) -> bool:
+        try:
+            ssh = self._session.get("ssh") if hasattr(self, "_session") else None
+            if not ssh or not hasattr(ssh, "send_shell_input"):
+                return False
+            text = QApplication.clipboard().text()
+            if not text:
+                return False
+            text = text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r")
+            if ssh.send_shell_input(text):
+                self.console.setFocus()
+                return True
+        except Exception:
+            pass
+        return False
+
     def _console_shell_geometry(self) -> tuple[int, int]:
         try:
             viewport = self.console.viewport()
@@ -451,7 +519,7 @@ class LoginWidget(QWidget):
         worker = _ConnectionWorker(
             cfg,
             self._console_shell_geometry(),
-            self.append_console,
+            self.append_ssh_console,
             self.append_shell_output,
             self._notify_ssh_disconnected,
         )
@@ -604,6 +672,29 @@ class LoginWidget(QWidget):
         QMessageBox.critical(self, t("login.err_title"), t("login.err_master_wrong"))
         return None
 
+    def _decrypt_profile_password(
+        self,
+        prof: dict,
+        *,
+        allow_prompt: bool,
+    ) -> str | None:
+        token = prof.get("password_dpapi")
+        if token:
+            try:
+                return unprotect_secret(str(token))
+            except Exception:
+                QMessageBox.critical(
+                    self,
+                    t("login.err_title"),
+                    t("connection.saved_password_unavailable"),
+                )
+                return None
+        if prof.get("password_enc") and prof.get("password_salt"):
+            if not allow_prompt:
+                return None
+            return self._decrypt_saved_password(prof)
+        return ""
+
     def pick_key(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, t("login.ssh_key") if t("login.ssh_key") != "[login.ssh_key]" else "SSH Anahtar Seç")
         if path:
@@ -621,6 +712,12 @@ class LoginWidget(QWidget):
 
         save_pw = bool(prof.get("save_password", False))
         self.cb_save_password.setChecked(save_pw)
+        self._password_prompt_policy = (
+            prof.get("password_prompt_policy") or "when-needed"
+        )
+        self._profile_system_settings = normalize_system_settings(
+            prof.get("system")
+        )
         # Never auto-fill decrypted password.
         # If legacy plain password exists, show it; if encrypted, keep empty.
         if save_pw and isinstance(prof.get("password"), str) and prof.get("password"):
@@ -633,11 +730,9 @@ class LoginWidget(QWidget):
         return next((p for p in profiles if p.get("name") == name), None)
 
     def open_add_connection_dialog(self) -> None:
-        selected = self._selected_profile_name()
-        initial = self._load_profile_by_name(selected) if selected else None
         dlg = ConnectionDialog(
             self,
-            initial_profile=initial,
+            initial_profile=None,
             on_save=self._save_profile_from_dialog,
             on_connect=self._save_and_connect_from_dialog,
         )
@@ -650,6 +745,28 @@ class LoginWidget(QWidget):
         initial = self._load_profile_by_name(name)
         if not initial:
             return
+        if (
+            (initial.get("password_prompt_policy") or "when-needed") == "edit-only"
+            and initial.get("password_dpapi")
+        ):
+            expected = self._decrypt_profile_password(initial, allow_prompt=False)
+            if expected is None:
+                return
+            entered, ok = QInputDialog.getText(
+                self,
+                t("connection.edit_auth_title"),
+                t("connection.edit_auth_prompt"),
+                QLineEdit.EchoMode.Password,
+            )
+            if not ok:
+                return
+            if entered != expected:
+                QMessageBox.warning(
+                    self,
+                    t("login.err_title"),
+                    t("connection.edit_auth_failed"),
+                )
+                return
         dlg = ConnectionDialog(
             self,
             initial_profile=initial,
@@ -689,6 +806,12 @@ class LoginWidget(QWidget):
         self.connect_selected_profile()
 
     def _save_profile_from_dialog(self, profile: dict) -> bool:
+        self._profile_system_settings = normalize_system_settings(
+            profile.get("system")
+        )
+        self._password_prompt_policy = (
+            profile.get("password_prompt_policy") or "when-needed"
+        )
         self._load_profile_into_fields(profile)
         return self.save_profile()
 
@@ -711,8 +834,9 @@ class LoginWidget(QWidget):
     def save_profile(self) -> bool:
         name = self.profile_name.text().strip()
         if not name:
-            # auto name: user@host
-            name = f"{self.username.text().strip()}@{self.host.text().strip()}"
+            username = self.username.text().strip()
+            host = self.host.text().strip()
+            name = f"{username}@{host}" if username else host
             self.profile_name.setText(name)
 
         try:
@@ -731,6 +855,8 @@ class LoginWidget(QWidget):
             "x11_forwarding": self.cb_x11.isChecked(),
             # dry_run removed
             "save_password": self.cb_save_password.isChecked(),
+            "password_prompt_policy": self._password_prompt_policy,
+            "system": normalize_system_settings(self._profile_system_settings),
         }
 
         # Password storage (encrypted):
@@ -738,7 +864,23 @@ class LoginWidget(QWidget):
         # - When saving with "save password", ask for a master password and encrypt.
         if self.cb_save_password.isChecked():
             plain = self.password.text() or ""
-            if plain:
+            if (
+                self._password_prompt_policy == "edit-only"
+                and os_secret_store_available()
+                and plain
+            ):
+                try:
+                    prof["password_dpapi"] = protect_secret(plain)
+                except Exception as exc:
+                    QMessageBox.critical(
+                        self,
+                        t("login.err_title"),
+                        t("connection.password_store_failed").format(
+                            error=exc
+                        ),
+                    )
+                    return False
+            elif plain:
                 master = self._ask_master_password(confirm=True)
                 if master is None:
                     return False
@@ -748,9 +890,10 @@ class LoginWidget(QWidget):
             else:
                 # keep existing encrypted password if present (when editing profile)
                 current = next((p for p in load_profiles() if p.get("name") == name), None)
-                if current and current.get("password_enc") and current.get("password_salt"):
-                    prof["password_enc"] = current.get("password_enc")
-                    prof["password_salt"] = current.get("password_salt")
+                if current:
+                    for key in ("password_dpapi", "password_enc", "password_salt"):
+                        if current.get(key):
+                            prof[key] = current.get(key)
 
             # Always clear legacy plaintext field
             prof["password"] = ""
@@ -758,6 +901,7 @@ class LoginWidget(QWidget):
             prof["password"] = ""
             prof.pop("password_enc", None)
             prof.pop("password_salt", None)
+            prof.pop("password_dpapi", None)
 
         upsert_profile(prof)
         original_name = getattr(self, "_editing_profile_original_name", "").strip()
@@ -778,14 +922,17 @@ class LoginWidget(QWidget):
 
         old_ssh = self._session.get("ssh") if hasattr(self, "_session") else None
 
-        # If password is not typed but profile has encrypted password, ask master and decrypt.
+        # If password is not typed, resolve the saved secret according to the profile policy.
         password = self.password.text()
         if not password:
             name = (self.profile_name.text() or "").strip()
             if name:
                 prof = next((p for p in load_profiles() if p.get("name") == name), None)
-                if prof and prof.get("save_password") and prof.get("password_enc") and prof.get("password_salt"):
-                    password = self._decrypt_saved_password(prof)
+                if prof and prof.get("save_password"):
+                    password = self._decrypt_profile_password(
+                        prof,
+                        allow_prompt=True,
+                    )
                     if password is None:
                         return False
 
@@ -798,10 +945,13 @@ class LoginWidget(QWidget):
             host_key_policy=("strict" if self.cb_strict_hostkey.isChecked() else "accept-new"),
             x11_forwarding=self.cb_x11.isChecked(),
             dry_run=False,
+            system_settings=normalize_system_settings(
+                self._profile_system_settings
+            ),
         )
 
-        if not cfg.host or not cfg.username:
-            QMessageBox.warning(self, t("login.err_title"), t("login.err_host_user_required"))
+        if not cfg.host:
+            QMessageBox.warning(self, t("login.err_title"), t("login.err_host_required"))
             return False
 
         # X11 preflight: if X11 forwarding is enabled and the user asked for
@@ -813,7 +963,8 @@ class LoginWidget(QWidget):
                 QMessageBox.warning(self, t("login.x11_title"), t("login.err_x11_plink_needed"))
                 return False
 
-        self.append_console(f"Bağlanılıyor: {cfg.username}@{cfg.host}:{cfg.port}")
+        target = f"{cfg.username}@{cfg.host}" if cfg.username else cfg.host
+        self.append_console(f"Bağlanılıyor: {target}:{cfg.port}")
         try:
             if cfg.dry_run:
                 ssh = None

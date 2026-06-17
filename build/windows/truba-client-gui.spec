@@ -64,6 +64,7 @@ binaries = collect_dynamic_libs("shiboken6")
 
 excludes = [
     "PySide6.scripts.deploy_lib",
+    "_truba_gui_perf_probe",
 ]
 
 a = Analysis(

@@ -57,6 +57,10 @@ function Get-ChangelogSection {
         }
     }
 
+    while ($end -gt $start -and [string]::IsNullOrWhiteSpace($lines[$end - 1])) {
+        $end--
+    }
+
     return ($lines[$start..($end - 1)] -join [Environment]::NewLine)
 }
 
