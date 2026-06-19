@@ -311,6 +311,16 @@ class RemoteDirPanel(QWidget):
         self.btn_upload = QPushButton(t("dirs.upload") if t("dirs.upload") != "[dirs.upload]" else "Yükle")
         self.btn_upload.clicked.connect(self.upload_files)
 
+        self.btn_new_folder = QPushButton(
+            t("dirs.new_folder") if t("dirs.new_folder") != "[dirs.new_folder]" else "Yeni Klasör"
+        )
+        self.btn_new_folder.clicked.connect(self.create_new_folder)
+
+        self.btn_new_file = QPushButton(
+            t("dirs.new_file") if t("dirs.new_file") != "[dirs.new_file]" else "Yeni Dosya"
+        )
+        self.btn_new_file.clicked.connect(self.create_new_file)
+
         self.btn_template_upload = QPushButton(
             t("dirs.template_upload") if t("dirs.template_upload") != "[dirs.template_upload]" else "Template Upload"
         )
@@ -344,6 +354,8 @@ class RemoteDirPanel(QWidget):
         top = QHBoxLayout()
         top.addWidget(self.lbl)
         top.addStretch(1)
+        top.addWidget(self.btn_new_folder)
+        top.addWidget(self.btn_new_file)
         top.addWidget(self.btn_upload)
         top.addWidget(self.btn_template_upload)
         top.addWidget(self.btn_download)
@@ -403,6 +415,8 @@ class RemoteDirPanel(QWidget):
         self._update_navigation_controls()
 
     def retranslate_ui(self) -> None:
+        self.btn_new_folder.setText(t("dirs.new_folder"))
+        self.btn_new_file.setText(t("dirs.new_file"))
         self.btn_upload.setText(t("dirs.upload"))
         self.btn_template_upload.setText(t("dirs.template_upload"))
         self.btn_download.setText(t("dirs.download_selected"))
@@ -488,8 +502,70 @@ class RemoteDirPanel(QWidget):
         has_parent = bool(self._remote_parent_dir(self.current_dir)) if has_session else False
         if hasattr(self, "btn_parent"):
             self.btn_parent.setEnabled(has_parent)
+        if hasattr(self, "btn_new_folder"):
+            self.btn_new_folder.setEnabled(bool(has_session and self.current_dir))
+        if hasattr(self, "btn_new_file"):
+            self.btn_new_file.setEnabled(bool(has_session and self.current_dir))
         if hasattr(self, "btn_template_upload"):
             self.btn_template_upload.setEnabled(bool(has_session and self.current_dir))
+
+    @staticmethod
+    def _child_path(parent_dir: str, name: str) -> str:
+        return (parent_dir.rstrip("/") or "") + "/" + name
+
+    def _prompt_new_name(self, *, kind: str) -> str:
+        is_folder = kind == "folder"
+        title_key = "dirs.new_folder_title" if is_folder else "dirs.new_file_title"
+        label_key = "dirs.new_folder_label" if is_folder else "dirs.new_file_label"
+        name, ok = QInputDialog.getText(self, t(title_key), t(label_key))
+        if not ok:
+            return ""
+        name = (name or "").strip()
+        if not name:
+            return ""
+        if name in (".", "..") or "/" in name or "\\" in name:
+            QMessageBox.warning(self, t("common.error"), t("dirs.invalid_new_name"))
+            return ""
+        return name
+
+    def _create_remote_item(self, *, kind: str, parent_dir: Optional[str] = None) -> bool:
+        if not self.session or not self.session.get("files"):
+            QMessageBox.warning(self, t("common.error"), t("common.no_connection"))
+            return False
+        raw_target_dir = parent_dir or self.current_dir or ""
+        if not raw_target_dir:
+            QMessageBox.warning(self, t("common.error"), t("dirs.no_directory_selected"))
+            return False
+        target_dir = raw_target_dir.rstrip("/") or "/"
+
+        name = self._prompt_new_name(kind=kind)
+        if not name:
+            return False
+        target_path = self._child_path(target_dir, name)
+        files = self.session["files"]
+        try:
+            if files.exists(target_path):
+                QMessageBox.warning(
+                    self,
+                    t("dirs.conflict_title"),
+                    t("dirs.new_item_exists").format(path=target_path),
+                )
+                return False
+            if kind == "folder":
+                files.mkdir(target_path)
+            else:
+                files.write_text(target_path, "")
+            self.refresh()
+            return True
+        except Exception as e:
+            show_exception(self, title=t("common.error"), user_message=str(e), exc=e, area="FILES")
+            return False
+
+    def create_new_folder(self, parent_dir: Optional[str] = None) -> bool:
+        return self._create_remote_item(kind="folder", parent_dir=parent_dir)
+
+    def create_new_file(self, parent_dir: Optional[str] = None) -> bool:
+        return self._create_remote_item(kind="file", parent_dir=parent_dir)
 
     def _handle_item_double_clicked(self, item, col):
         path = str(item.data(0, Qt.ItemDataRole.UserRole) or "")
@@ -735,6 +811,16 @@ class RemoteDirPanel(QWidget):
 
         menu = QMenu(self)
 
+        new_parent_dir = clicked_path if clicked_path and clicked_is_dir else (self.current_dir or "/")
+        new_menu = menu.addMenu(t("dirs.new") if t("dirs.new") != "[dirs.new]" else "Yeni")
+        act_new_folder = new_menu.addAction(
+            t("dirs.new_folder") if t("dirs.new_folder") != "[dirs.new_folder]" else "Yeni Klasör"
+        )
+        act_new_file = new_menu.addAction(
+            t("dirs.new_file") if t("dirs.new_file") != "[dirs.new_file]" else "Yeni Dosya"
+        )
+        menu.addSeparator()
+
         # Undo
         act_undo = None
         if RemoteDirPanel._last_undo is not None:
@@ -813,6 +899,13 @@ class RemoteDirPanel(QWidget):
 
         chosen = menu.exec(view.viewport().mapToGlobal(pos))
         if not chosen:
+            return
+
+        if chosen == act_new_folder:
+            self.create_new_folder(new_parent_dir)
+            return
+        if chosen == act_new_file:
+            self.create_new_file(new_parent_dir)
             return
 
         if act_undo is not None and chosen == act_undo:

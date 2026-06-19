@@ -7,6 +7,7 @@
 - Responsiveness: moved remote polling and command execution off the GUI thread, prevented overlapping requests, and reduced duplicate SSH/log rendering work.
 - Connection console: added right-click paste from the system clipboard into the live SSH shell.
 - Directories: added a context-menu action to copy the full remote path including the file name.
+- Directories: added New Folder and New File buttons plus a right-click New submenu for creating remote items in the current or selected directory.
 - Jobs files: added a refresh button to the Files subtab and F5 refresh support for file panels in Jobs and Directories.
 
 ## v1.1.5
