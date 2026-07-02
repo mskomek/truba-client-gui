@@ -112,6 +112,104 @@ def set_transfer_parallelism(count: int) -> int:
     return value
 
 
+def get_ftp_transfer_type(default: str = "auto") -> str:
+    value = str(load_settings().get("ftp_transfer_type", default)).strip().lower()
+    return value if value in {"auto", "binary", "ascii"} else default
+
+
+def set_ftp_transfer_type(value: str) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized not in {"auto", "binary", "ascii"}:
+        normalized = "auto"
+    update_settings({"ftp_transfer_type": normalized})
+    return normalized
+
+
+def _normalize_file_extension(extension: str) -> str:
+    value = str(extension or "").strip().lower()
+    if not value:
+        return ""
+    return value if value.startswith(".") else f".{value}"
+
+
+def get_file_associations() -> Dict[str, str]:
+    value = load_settings().get("file_associations", {})
+    if not isinstance(value, dict):
+        return {}
+    associations: Dict[str, str] = {}
+    for extension, program in value.items():
+        normalized = _normalize_file_extension(str(extension))
+        program_path = str(program or "").strip()
+        if normalized and program_path:
+            associations[normalized] = program_path
+    return associations
+
+
+def get_file_association(extension: str) -> str:
+    normalized = _normalize_file_extension(extension)
+    if not normalized:
+        return ""
+    return get_file_associations().get(normalized, "")
+
+
+def set_file_association(extension: str, program_path: str) -> Dict[str, str]:
+    normalized = _normalize_file_extension(extension)
+    associations = get_file_associations()
+    if normalized:
+        program = str(program_path or "").strip()
+        if program:
+            associations[normalized] = program
+        else:
+            associations.pop(normalized, None)
+    update_settings({"file_associations": associations})
+    return associations
+
+
+def clear_file_association(extension: str) -> Dict[str, str]:
+    normalized = _normalize_file_extension(extension)
+    associations = get_file_associations()
+    if normalized:
+        associations.pop(normalized, None)
+    update_settings({"file_associations": associations})
+    return associations
+
+
+def get_ftp_state() -> Dict[str, Any]:
+    st = load_settings()
+    sizes = st.get("ftp_splitter_sizes", [1, 1])
+    if not isinstance(sizes, list) or len(sizes) != 2:
+        sizes = [1, 1]
+    try:
+        sizes = [max(1, int(sizes[0])), max(1, int(sizes[1]))]
+    except Exception:
+        sizes = [1, 1]
+    active = str(st.get("ftp_active_remote", "scratch")).lower()
+    if active not in {"scratch", "home"}:
+        active = "scratch"
+    return {
+        "local_dir": str(st.get("ftp_local_dir", "")),
+        "active_remote": active,
+        "splitter_sizes": sizes,
+    }
+
+
+def update_ftp_state(
+    *,
+    local_dir: str | None = None,
+    active_remote: str | None = None,
+    splitter_sizes: List[int] | None = None,
+) -> Dict[str, Any]:
+    patch: Dict[str, Any] = {}
+    if local_dir is not None:
+        patch["ftp_local_dir"] = str(local_dir)
+    if active_remote is not None:
+        active = str(active_remote).lower()
+        patch["ftp_active_remote"] = active if active in {"scratch", "home"} else "scratch"
+    if splitter_sizes is not None and len(splitter_sizes) == 2:
+        patch["ftp_splitter_sizes"] = [max(1, int(value)) for value in splitter_sizes]
+    return update_settings(patch)
+
+
 def save_config(cfg: Dict[str, Any]) -> None:
     p = _config_path()
     p.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")

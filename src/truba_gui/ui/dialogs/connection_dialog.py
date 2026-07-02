@@ -12,13 +12,21 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLineEdit,
+    QInputDialog,
+    QMenu,
     QMessageBox,
     QPushButton,
+    QToolButton,
     QVBoxLayout,
 )
 
 from truba_gui.core.i18n import t
-from truba_gui.config.system_profile import normalize_system_settings
+from truba_gui.config.system_profile import (
+    builtin_system_template_groups,
+    load_user_system_templates,
+    normalize_system_settings,
+    save_user_system_template,
+)
 
 ProfileData = dict[str, Any]
 
@@ -36,6 +44,8 @@ class ConnectionDialog(QDialog):
         self._initial_profile = dict(initial_profile or {})
         self._on_save = on_save
         self._on_connect = on_connect
+        self._system_template_menu: QMenu | None = None
+        self._system_template_submenus: list[QMenu] = []
 
         self.setModal(True)
         self.setWindowTitle(t("connection.dialog_title"))
@@ -93,8 +103,20 @@ class ConnectionDialog(QDialog):
         self.active_job_ids_command = QLineEdit()
         self.job_state_command = QLineEdit()
 
+        self.btn_system_templates = QToolButton()
+        self.btn_system_templates.setText(t("connection.system_templates_menu"))
+        self.btn_system_templates.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.btn_save_system_template = QPushButton(t("connection.save_system_template"))
+        self.btn_save_system_template.clicked.connect(self._save_current_system_template)
+
+        system_actions = QHBoxLayout()
+        system_actions.addWidget(self.btn_system_templates)
+        system_actions.addWidget(self.btn_save_system_template)
+        system_actions.addStretch(1)
+
         system_form = QFormLayout()
         system_form.addRow(t("connection.system_name"), self.system_name)
+        system_form.addRow(t("connection.system_templates"), system_actions)
         system_form.addRow(t("connection.scratch_dir"), self.scratch_dir)
         system_form.addRow(t("connection.home_dir"), self.home_dir)
         system_form.addRow(t("connection.squeue_command"), self.squeue_command)
@@ -135,6 +157,7 @@ class ConnectionDialog(QDialog):
         root.addLayout(button_row)
 
         self._load_profile(self._initial_profile)
+        self._rebuild_system_template_menu()
 
     def _load_profile(self, profile: ProfileData) -> None:
         self.profile_name.setText(str(profile.get("name", "")))
@@ -168,6 +191,86 @@ class ConnectionDialog(QDialog):
         else:
             self.password.setText("")
 
+    def _system_form_values(self) -> dict[str, str]:
+        return {
+            "name": self.system_name.text().strip(),
+            "scratch_dir": self.scratch_dir.text().strip(),
+            "home_dir": self.home_dir.text().strip(),
+            "squeue_command": self.squeue_command.text().strip(),
+            "sbatch_command": self.sbatch_command.text().strip(),
+            "scancel_command": self.scancel_command.text().strip(),
+            "sacct_command": self.sacct_command.text().strip(),
+            "scontrol_command": self.scontrol_command.text().strip(),
+            "status_command": self.status_command.text().strip(),
+            "active_job_ids_command": self.active_job_ids_command.text().strip(),
+            "job_state_command": self.job_state_command.text().strip(),
+        }
+
+    def _apply_system_template(self, template: ProfileData) -> None:
+        system = normalize_system_settings(template)
+        self.system_name.setText(system["name"])
+        self.scratch_dir.setText(system["scratch_dir"])
+        self.home_dir.setText(system["home_dir"])
+        self.squeue_command.setText(system["squeue_command"])
+        self.sbatch_command.setText(system["sbatch_command"])
+        self.scancel_command.setText(system["scancel_command"])
+        self.sacct_command.setText(system["sacct_command"])
+        self.scontrol_command.setText(system["scontrol_command"])
+        self.status_command.setText(system["status_command"])
+        self.active_job_ids_command.setText(system["active_job_ids_command"])
+        self.job_state_command.setText(system["job_state_command"])
+
+    def _rebuild_system_template_menu(self) -> None:
+        menu = QMenu(self)
+        submenus: list[QMenu] = []
+        for group_name, templates in builtin_system_template_groups().items():
+            submenu = QMenu(group_name, menu)
+            menu.addMenu(submenu)
+            submenus.append(submenu)
+            for template in templates:
+                action = submenu.addAction(template["name"])
+                action.triggered.connect(
+                    lambda _checked=False, selected=dict(template): self._apply_system_template(selected)
+                )
+        user_templates = load_user_system_templates()
+        if user_templates:
+            user_menu = QMenu(t("connection.user_templates"), menu)
+            menu.addMenu(user_menu)
+            submenus.append(user_menu)
+            for template in user_templates:
+                action = user_menu.addAction(template["name"])
+                action.triggered.connect(
+                    lambda _checked=False, selected=dict(template): self._apply_system_template(selected)
+                )
+        self._system_template_menu = menu
+        self._system_template_submenus = submenus
+        self.btn_system_templates.setMenu(menu)
+
+    def _save_current_system_template(self) -> None:
+        default_name = self.system_name.text().strip() or t("connection.custom_system_template")
+        name, ok = QInputDialog.getText(
+            self,
+            t("connection.save_system_template"),
+            t("connection.system_template_name"),
+            text=default_name,
+        )
+        if not ok:
+            return
+        name = (name or "").strip()
+        if not name:
+            QMessageBox.warning(
+                self,
+                t("common.error"),
+                t("connection.system_template_name_required"),
+            )
+            return
+        try:
+            save_user_system_template(name, self._system_form_values())
+        except ValueError as exc:
+            QMessageBox.warning(self, t("common.error"), str(exc))
+            return
+        self._rebuild_system_template_menu()
+
     def pick_key(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, t("login.ssh_key"))
         if path:
@@ -196,17 +299,7 @@ class ConnectionDialog(QDialog):
                 else "when-needed"
             ),
             "system": {
-                "name": self.system_name.text().strip(),
-                "scratch_dir": self.scratch_dir.text().strip(),
-                "home_dir": self.home_dir.text().strip(),
-                "squeue_command": self.squeue_command.text().strip(),
-                "sbatch_command": self.sbatch_command.text().strip(),
-                "scancel_command": self.scancel_command.text().strip(),
-                "sacct_command": self.sacct_command.text().strip(),
-                "scontrol_command": self.scontrol_command.text().strip(),
-                "status_command": self.status_command.text().strip(),
-                "active_job_ids_command": self.active_job_ids_command.text().strip(),
-                "job_state_command": self.job_state_command.text().strip(),
+                **self._system_form_values(),
             },
         }
 

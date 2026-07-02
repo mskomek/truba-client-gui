@@ -23,6 +23,7 @@ from truba_gui.services.app_updater import (
 from .widgets.login_widget import LoginWidget
 from .widgets.jobs_outputs_widget import JobsOutputsWidget
 from .widgets.directories_widget import DirectoriesWidget
+from .widgets.ftp_widget import FtpWidget
 from .widgets.editor_widget import EditorWidget
 from .widgets.logs_widget import LogsWidget
 from .dialogs.help_dialog import HelpDialog
@@ -105,12 +106,17 @@ class MainWindow(QMainWindow):
         self.login = LoginWidget()
         self.jobs_outputs = JobsOutputsWidget()
         self.directories = DirectoriesWidget()
+        self.ftp = FtpWidget()
         self.editor = EditorWidget()
         self.logs = LogsWidget()
 
         self.tabs.addTab(self.login, t("tabs.login"))
         self.tabs.addTab(self.jobs_outputs, t("tabs.jobs_outputs"))
         self.tabs.addTab(self.directories, t("tabs.directories"))
+        self.tabs.addTab(
+            self.ftp,
+            t("tabs.ftp") if t("tabs.ftp") != "[tabs.ftp]" else "FTP",
+        )
         self.tabs.addTab(self.editor, t("tabs.editor"))
         self.tabs.addTab(self.logs, t("tabs.logs") if t("tabs.logs") != "[tabs.logs]" else "Logs")
         self.tabs.currentChanged.connect(self._sync_command_polling)
@@ -119,6 +125,9 @@ class MainWindow(QMainWindow):
         )
 
         self.login.session_changed.connect(self.on_session_changed)
+        self.ftp.defaultPathsRequested.connect(
+            self.login.update_active_profile_remote_defaults
+        )
 
         # Job completion monitor
         self.job_timer = QTimer(self)
@@ -139,6 +148,8 @@ class MainWindow(QMainWindow):
         self.jobs_outputs.request_show_directories.connect(self.show_directories)
         self.directories.open_in_editor.connect(self.open_in_editor)
         self.directories.script_submitted.connect(self.on_script_submitted)
+        self.ftp.openFileRequested.connect(self.directories.on_open_file)
+        self.ftp.submitRequested.connect(self.directories.submit_script)
         self.editor.script_submitted.connect(self.on_script_submitted)
         QTimer.singleShot(1500, lambda: self._check_for_updates(manual=False))
 
@@ -174,6 +185,8 @@ class MainWindow(QMainWindow):
             try:
                 if hasattr(self, "directories") and self.directories and hasattr(self.directories, "shutdown"):
                     self.directories.shutdown()
+                if hasattr(self, "ftp") and self.ftp and hasattr(self.ftp, "shutdown"):
+                    self.ftp.shutdown()
             except Exception:
                 pass
 
@@ -295,9 +308,14 @@ class MainWindow(QMainWindow):
 
     def _open_settings(self):
         try:
-            dlg = SettingsDialog(self)
+            dlg = SettingsDialog(
+                self,
+                session=getattr(self, "_session", None),
+                update_remote_defaults=self.login.update_active_profile_remote_defaults,
+            )
             dlg.exec()
             self.jobs_outputs.apply_refresh_settings()
+            self.ftp.apply_settings()
         except Exception:
             pass
 
@@ -464,6 +482,10 @@ class MainWindow(QMainWindow):
             self.tabs.setTabText(self.tabs.indexOf(self.login), t("tabs.login"))
             self.tabs.setTabText(self.tabs.indexOf(self.jobs_outputs), t("tabs.jobs_outputs"))
             self.tabs.setTabText(self.tabs.indexOf(self.directories), t("tabs.directories"))
+            self.tabs.setTabText(
+                self.tabs.indexOf(self.ftp),
+                t("tabs.ftp") if t("tabs.ftp") != "[tabs.ftp]" else "FTP",
+            )
             self.tabs.setTabText(self.tabs.indexOf(self.editor), t("tabs.editor"))
             self.tabs.setTabText(self.tabs.indexOf(self.logs), t("tabs.logs"))
 
@@ -512,6 +534,7 @@ class MainWindow(QMainWindow):
             getattr(self, "login", None),
             getattr(self, "jobs_outputs", None),
             getattr(self, "directories", None),
+            getattr(self, "ftp", None),
             getattr(self, "editor", None),
             getattr(self, "logs", None),
         ):
@@ -529,6 +552,7 @@ class MainWindow(QMainWindow):
         self._job_monitor_initialized = False
         self.jobs_outputs.set_session(session)
         self.directories.set_session(session)
+        self.ftp.set_session(session)
         self.editor.set_session(session)
         self._sync_command_polling()
 

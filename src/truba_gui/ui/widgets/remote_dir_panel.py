@@ -3,10 +3,12 @@ from __future__ import annotations
 import datetime
 import json
 import os
+import re
 import shutil
+from time import monotonic
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 from PySide6.QtCore import QEvent, QPoint, Qt, Signal, QObject, QThread, Slot
 from PySide6.QtGui import QDrag, QIcon, QKeyEvent, QKeySequence, QShortcut
@@ -14,11 +16,8 @@ from PySide6.QtCore import QMimeData
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
-    QCheckBox,
-    QDialog,
     QGroupBox,
     QListWidget,
-    QProgressDialog,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -27,6 +26,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QStyle,
+    QTabBar,
     QToolButton,
     QTabWidget,
     QTreeWidget,
@@ -40,6 +40,17 @@ from truba_gui.core.ui_errors import show_exception
 from truba_gui.config.storage import get_transfer_parallelism
 from truba_gui.services.file_clipboard import get_file_clipboard
 from truba_gui.services.files_base import RemoteEntry
+from truba_gui.services.transfer_mode import (
+    BINARY,
+    download_with_mode,
+    normalize_transfer_mode,
+    upload_with_mode,
+)
+from truba_gui.ui.dialogs.transfer_conflict_dialog import (
+    TransferConflictDecision,
+    TransferConflictDialog,
+    TransferConflictInfo,
+)
 from truba_gui.ui.dialogs.transfer_dialog import TransferDialog, TransferItem
 
 
@@ -95,6 +106,42 @@ def _category(entry: RemoteEntry) -> str:
 
 
 MIME_REMOTE_PATHS = "application/x-truba-remote-paths"
+DIRECTORY_CACHE_TTL_SECONDS = 600.0
+
+REMOTE_CONTEXT_MENU_LABELS = [
+    "Download",
+    "Add files to queue",
+    "View/Edit",
+    "Open in new tab",
+    "---",
+    "Create directory",
+    "Create directory and enter it",
+    "Create new file",
+    "Refresh",
+    "---",
+    "Delete",
+    "Rename",
+    "Copy URL(s) to clipboard",
+    "File permissions...",
+]
+
+_SORT_NAME_ROLE = Qt.ItemDataRole.UserRole + 10
+_SORT_SIZE_ROLE = Qt.ItemDataRole.UserRole + 11
+_SORT_TYPE_ROLE = Qt.ItemDataRole.UserRole + 12
+_SORT_MTIME_ROLE = Qt.ItemDataRole.UserRole + 13
+
+
+def _natural_sort_key(value: str) -> tuple:
+    return tuple(
+        (1, int(part)) if part.isdigit() else (0, part.casefold())
+        for part in re.split(r"(\d+)", value or "")
+        if part
+    )
+
+
+def _tr(key: str, fallback: str) -> str:
+    value = t(key)
+    return fallback if value == f"[{key}]" else value
 
 
 @dataclass
@@ -197,12 +244,69 @@ class _RemoteTree(QTreeWidget):
     def __init__(self, panel: "RemoteDirPanel"):
         super().__init__()
         self._panel = panel
+        self._sort_column: Optional[int] = None
+        self._sort_order = Qt.SortOrder.AscendingOrder
 
         self.setDragEnabled(True)
         self.setAcceptDrops(True)
         self.setDropIndicatorShown(True)
         self.setDragDropMode(QTreeWidget.DragDropMode.DragDrop)
         self.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.header().setSectionsClickable(True)
+        self.header().setSortIndicatorShown(False)
+        self.header().sectionClicked.connect(self._on_header_clicked)
+
+    def _on_header_clicked(self, column: int) -> None:
+        if column < 0 or column >= 4:
+            return
+        if self._sort_column == column:
+            self._sort_order = (
+                Qt.SortOrder.DescendingOrder
+                if self._sort_order == Qt.SortOrder.AscendingOrder
+                else Qt.SortOrder.AscendingOrder
+            )
+        else:
+            self._sort_column = column
+            self._sort_order = Qt.SortOrder.AscendingOrder
+        self.header().setSortIndicatorShown(True)
+        self.header().setSortIndicator(column, self._sort_order)
+        self.apply_sort()
+
+    def apply_sort(self) -> None:
+        if self._sort_column is None or self.topLevelItemCount() < 2:
+            return
+
+        items = [self.takeTopLevelItem(0) for _ in range(self.topLevelItemCount())]
+        parent_items = [item for item in items if bool(item.data(0, Qt.ItemDataRole.UserRole + 2))]
+        folders = [
+            item
+            for item in items
+            if item not in parent_items and bool(item.data(0, Qt.ItemDataRole.UserRole + 1))
+        ]
+        files = [
+            item
+            for item in items
+            if item not in parent_items and not bool(item.data(0, Qt.ItemDataRole.UserRole + 1))
+        ]
+        reverse = self._sort_order == Qt.SortOrder.DescendingOrder
+
+        def key(item: QTreeWidgetItem):
+            role = (
+                _SORT_NAME_ROLE,
+                _SORT_SIZE_ROLE,
+                _SORT_TYPE_ROLE,
+                _SORT_MTIME_ROLE,
+            )[self._sort_column]
+            value = item.data(0, role)
+            if self._sort_column in (0, 2):
+                return _natural_sort_key(str(value or ""))
+            return int(value or 0)
+
+        self.addTopLevelItems(
+            parent_items
+            + sorted(folders, key=key, reverse=reverse)
+            + sorted(files, key=key, reverse=reverse)
+        )
 
     def startDrag(self, supportedActions: Qt.DropActions) -> None:  # type: ignore[override]
         paths = self._panel._selected_paths_from_view(self)
@@ -220,7 +324,7 @@ class _RemoteTree(QTreeWidget):
         if md.hasFormat(MIME_REMOTE_PATHS):
             event.acceptProposedAction()
             return
-        if md.hasUrls() and any(u.isLocalFile() for u in md.urls()):
+        if self._panel._local_paths_from_mime(md):
             event.acceptProposedAction()
             return
         super().dragEnterEvent(event)
@@ -230,7 +334,7 @@ class _RemoteTree(QTreeWidget):
         if md.hasFormat(MIME_REMOTE_PATHS):
             event.acceptProposedAction()
             return
-        if md.hasUrls() and any(u.isLocalFile() for u in md.urls()):
+        if self._panel._local_paths_from_mime(md):
             event.acceptProposedAction()
             return
         super().dragMoveEvent(event)
@@ -264,15 +368,11 @@ class _RemoteTree(QTreeWidget):
             return
 
         # 2) Local->Remote OS drag (upload)
-        if md.hasUrls() and any(u.isLocalFile() for u in md.urls()):
-            dest_dir = self._panel.current_dir or "/"
-            item = self.itemAt(event.position().toPoint())
-            if item is not None:
-                clicked_path = str(item.data(0, Qt.ItemDataRole.UserRole) or "")
-                clicked_is_dir = bool(item.data(0, Qt.ItemDataRole.UserRole + 1))
-                if clicked_path and clicked_is_dir:
-                    dest_dir = clicked_path.rstrip("/")
-            local_paths = [u.toLocalFile() for u in md.urls() if u.isLocalFile()]
+        local_paths = self._panel._local_paths_from_mime(md)
+        if local_paths:
+            dest_dir = self._panel._drop_dest_dir_for_item(
+                self.itemAt(event.position().toPoint())
+            )
             ok = self._panel._apply_local_upload(local_paths, dest_dir)
             if ok:
                 event.acceptProposedAction()
@@ -285,8 +385,10 @@ class _RemoteTree(QTreeWidget):
 
 class RemoteDirPanel(QWidget):
     open_file = Signal(str)  # remote path (file double click)
+    file_activated = Signal(str)
     open_in_slot = Signal(int, str)  # slot_index(0/1), remote path
     submit_requested = Signal(str)  # remote Slurm script path
+    set_default_requested = Signal()
 
     # registry to refresh source/target panels on move
     _instances: Dict[str, "RemoteDirPanel"] = {}
@@ -298,15 +400,26 @@ class RemoteDirPanel(QWidget):
         super().__init__()
         self.session = None
         self.enable_output_menu = False  # JobsOutputsWidget can turn this on
+        self.default_location_label = ""
         self.current_dir = ""
+        self._category_dir = ""
         self.title = title
+        self._transfer_mode_provider: Optional[Callable[[str], str]] = None
+        self._transfer_activity_callback: Optional[
+            Callable[[str, List[TransferItem], str], None]
+        ] = None
+        self._transfer_dialogs: List[TransferDialog] = []
+        self._active_transfer_keys: set[tuple[str, str, str]] = set()
+        self._show_transfer_dialog = True
+        self._directory_cache: Dict[str, Tuple[float, List[RemoteEntry]]] = {}
 
         self.panel_id = str(id(self))
         RemoteDirPanel._instances[self.panel_id] = self
+        self.setAcceptDrops(True)
 
         self.lbl = QLabel(title)
         self.path = QLineEdit()
-        self.path.setReadOnly(True)
+        self.path.returnPressed.connect(self._open_path_field)
 
         self.btn_upload = QPushButton(t("dirs.upload") if t("dirs.upload") != "[dirs.upload]" else "Yükle")
         self.btn_upload.clicked.connect(self.upload_files)
@@ -345,11 +458,11 @@ class RemoteDirPanel(QWidget):
         self.btn_parent.setEnabled(False)
 
         self.btn_refresh = QPushButton(t("dirs.refresh") if t("dirs.refresh") != "[dirs.refresh]" else "Yenile")
-        self.btn_refresh.clicked.connect(self.refresh)
+        self.btn_refresh.clicked.connect(lambda: self.refresh(force=True))
 
         self.refresh_shortcut = QShortcut(QKeySequence.Refresh, self)
         self.refresh_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
-        self.refresh_shortcut.activated.connect(self.refresh)
+        self.refresh_shortcut.activated.connect(lambda: self.refresh(force=True))
 
         top = QHBoxLayout()
         top.addWidget(self.lbl)
@@ -363,6 +476,11 @@ class RemoteDirPanel(QWidget):
         top.addWidget(self.btn_undo)
         top.addWidget(self.btn_parent)
         top.addWidget(self.btn_refresh)
+
+        self.directory_tabs = QTabBar()
+        self.directory_tabs.setExpanding(False)
+        self.directory_tabs.setMovable(True)
+        self.directory_tabs.currentChanged.connect(self._on_directory_tab_changed)
 
         self.tabs = QTabWidget()
         self.views: Dict[str, _RemoteTree] = {
@@ -381,12 +499,14 @@ class RemoteDirPanel(QWidget):
         )
         self.tabs.addTab(self.views["slurm"], t("dirs.tab_slurm") if t("dirs.tab_slurm") != "[dirs.tab_slurm]" else "Slurm")
         self.tabs.addTab(self.views["other"], t("dirs.tab_other") if t("dirs.tab_other") != "[dirs.tab_other]" else "Diğer")
+        self.tabs.currentChanged.connect(self._on_tab_changed)
 
         lay = QVBoxLayout(self)
         lay.addLayout(top)
         self.path_label = QLabel(t("dirs.path"))
         lay.addWidget(self.path_label)
         lay.addWidget(self.path)
+        lay.addWidget(self.directory_tabs)
         lay.addWidget(self.tabs)
 
         # Transfer queue (batch view)
@@ -430,6 +550,10 @@ class RemoteDirPanel(QWidget):
         tab_keys = ("all", "folders", "iso", "archives", "slurm", "other")
         for index, key in enumerate(tab_keys):
             self.tabs.setTabText(index, t(f"dirs.tab_{key}"))
+        for index in range(self.directory_tabs.count()):
+            directory = str(self.directory_tabs.tabData(index) or "")
+            if directory:
+                self.directory_tabs.setTabText(index, self._directory_tab_label(directory))
         headers = [
             t("dirs.col_name"),
             t("dirs.col_size"),
@@ -460,16 +584,81 @@ class RemoteDirPanel(QWidget):
         w.installEventFilter(self)
         return w
 
+    @staticmethod
+    def _directory_tab_label(remote_dir: str) -> str:
+        cleaned = (remote_dir or "/").rstrip("/") or "/"
+        return cleaned.rsplit("/", 1)[-1] or cleaned
+
+    def _on_tab_changed(self, index: int) -> None:
+        self._update_navigation_controls()
+
+    def _on_directory_tab_changed(self, index: int) -> None:
+        if index < 0:
+            return
+        remote_dir = str(self.directory_tabs.tabData(index) or "")
+        if not remote_dir:
+            return
+        self.current_dir = remote_dir
+        self._category_dir = remote_dir
+        self.path.setText(remote_dir)
+        self.refresh()
+
+    def open_directory_in_new_tab(self, remote_dir: str) -> bool:
+        if not self.session or not self.session.get("files"):
+            return False
+        target = (remote_dir or "").rstrip("/") or "/"
+        if not target:
+            return False
+        index = self._find_directory_tab(target)
+        if index < 0:
+            index = self.directory_tabs.addTab(self._directory_tab_label(target))
+            self.directory_tabs.setTabData(index, target)
+        changed = self.directory_tabs.currentIndex() != index
+        self.directory_tabs.setCurrentIndex(index)
+        self.current_dir = target
+        self._category_dir = target
+        self.path.setText(target)
+        if not changed:
+            self.refresh()
+        self._update_navigation_controls()
+        return True
+
+    def _find_directory_tab(self, remote_dir: str) -> int:
+        target = (remote_dir or "").rstrip("/") or "/"
+        for index in range(self.directory_tabs.count()):
+            if self.directory_tabs.tabData(index) == target:
+                return index
+        return -1
+
+    def _open_path_field(self) -> None:
+        self.set_dir(self.path.text())
+
     def eventFilter(self, watched, event):
         # Delete / Paste / Undo key support on directory views
         if isinstance(watched, QTreeWidget) and event.type() == QEvent.Type.KeyPress:
             e: QKeyEvent = event  # type: ignore
+            if e.key() == Qt.Key.Key_Backspace and not e.modifiers():
+                self.go_parent()
+                return True
             if e.key() == Qt.Key.Key_Delete:
                 self.delete_selected()
                 return True
             if e.key() == Qt.Key.Key_F5 and not e.modifiers():
                 self.refresh()
                 return True
+            if e.key() == Qt.Key.Key_F2 and not e.modifiers():
+                if self.rename_selected(watched):
+                    return True
+            if (e.modifiers() & Qt.KeyboardModifier.ControlModifier) and e.key() == Qt.Key.Key_C:
+                paths = self._selected_paths_from_view(watched)
+                if paths:
+                    get_file_clipboard().set("copy", paths)
+                    return True
+            if (e.modifiers() & Qt.KeyboardModifier.ControlModifier) and e.key() == Qt.Key.Key_X:
+                paths = self._selected_paths_from_view(watched)
+                if paths:
+                    get_file_clipboard().set("move", paths)
+                    return True
             if (e.modifiers() & Qt.KeyboardModifier.ControlModifier) and e.key() == Qt.Key.Key_V:
                 if self._paste_system_clipboard_into(self.current_dir or "/"):
                     return True
@@ -482,13 +671,144 @@ class RemoteDirPanel(QWidget):
 
     def set_session(self, session):
         self.session = session
+        self._directory_cache.clear()
         self._update_navigation_controls()
 
+    def set_transfer_mode_provider(
+        self, provider: Optional[Callable[[str], str]]
+    ) -> None:
+        self._transfer_mode_provider = provider
+
+    def set_transfer_activity_callback(
+        self,
+        callback: Optional[Callable[[str, List[TransferItem], str], None]],
+    ) -> None:
+        self._transfer_activity_callback = callback
+
+    def set_transfer_dialog_visible(self, visible: bool) -> None:
+        self._show_transfer_dialog = bool(visible)
+
+    def _requested_transfer_mode(self, path: str) -> str:
+        if self._transfer_mode_provider is None:
+            return BINARY
+        try:
+            return normalize_transfer_mode(self._transfer_mode_provider(path), BINARY)
+        except Exception:
+            return BINARY
+
     def set_dir(self, remote_dir: str):
-        self.current_dir = remote_dir
-        self.path.setText(remote_dir)
+        target = (remote_dir or "").rstrip("/") or "/"
+        self.current_dir = target
+        self._category_dir = target
+        signals_were_blocked = self.directory_tabs.blockSignals(True)
+        if self.directory_tabs.count() == 0:
+            index = self.directory_tabs.addTab(self._directory_tab_label(target))
+            self.directory_tabs.setTabData(index, target)
+            self.directory_tabs.setCurrentIndex(index)
+        else:
+            index = max(0, self.directory_tabs.currentIndex())
+            self.directory_tabs.setTabText(index, self._directory_tab_label(target))
+            self.directory_tabs.setTabData(index, target)
+        self.directory_tabs.blockSignals(signals_were_blocked)
+        self.path.setText(target)
         self._update_navigation_controls()
         self.refresh()
+
+    @staticmethod
+    def _cache_key(remote_dir: str) -> str:
+        return (remote_dir or "/").rstrip("/") or "/"
+
+    @classmethod
+    def _normalize_remote_dir(cls, remote_dir: Optional[str]) -> str:
+        return cls._cache_key(remote_dir or "/")
+
+    @classmethod
+    def _parent_remote_dir(cls, remote_path: str) -> str:
+        clean = (remote_path or "/").rstrip("/") or "/"
+        if clean == "/":
+            return "/"
+        return cls._normalize_remote_dir("/".join(clean.split("/")[:-1]) or "/")
+
+    def _invalidate_directory_cache(self, remote_dir: Optional[str] = None) -> None:
+        if remote_dir is None:
+            self._directory_cache.clear()
+            return
+        self._directory_cache.pop(self._cache_key(remote_dir), None)
+
+    def _finish_remote_directory_mutation(self, remote_dirs: Iterable[str]) -> None:
+        affected = {
+            self._normalize_remote_dir(remote_dir)
+            for remote_dir in remote_dirs
+            if remote_dir
+        }
+        if not affected:
+            return
+
+        panels = list(RemoteDirPanel._instances.values())
+        for panel in panels:
+            for remote_dir in affected:
+                panel._invalidate_directory_cache(remote_dir)
+
+        for panel in panels:
+            current = self._normalize_remote_dir(panel.current_dir or "/")
+            if current in affected:
+                panel.refresh(force=True)
+
+    def _listdir_entries_cached(
+        self,
+        remote_dir: str,
+        *,
+        force: bool = False,
+    ) -> List[RemoteEntry]:
+        if not self.session or not self.session.get("files"):
+            return []
+        key = self._cache_key(remote_dir)
+        now = monotonic()
+        cached = self._directory_cache.get(key)
+        if not force and cached is not None:
+            cached_at, entries = cached
+            if now - cached_at <= DIRECTORY_CACHE_TTL_SECONDS:
+                return list(entries)
+        entries = list(self.session["files"].listdir_entries(key))
+        self._directory_cache[key] = (now, entries)
+        return list(entries)
+
+    @staticmethod
+    def _local_paths_from_mime(mime) -> List[str]:
+        if not mime or not mime.hasUrls():
+            return []
+        return [url.toLocalFile() for url in mime.urls() if url.isLocalFile()]
+
+    def _drop_dest_dir_for_item(self, item: Optional[QTreeWidgetItem]) -> str:
+        dest_dir = self.current_dir or "/"
+        if item is not None:
+            clicked_path = str(item.data(0, Qt.ItemDataRole.UserRole) or "")
+            clicked_is_dir = bool(item.data(0, Qt.ItemDataRole.UserRole + 1))
+            if clicked_path and clicked_is_dir:
+                dest_dir = clicked_path.rstrip("/") or "/"
+        return dest_dir
+
+    def dragEnterEvent(self, event) -> None:  # type: ignore[override]
+        if self._local_paths_from_mime(event.mimeData()):
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event) -> None:  # type: ignore[override]
+        if self._local_paths_from_mime(event.mimeData()):
+            event.acceptProposedAction()
+            return
+        super().dragMoveEvent(event)
+
+    def dropEvent(self, event) -> None:  # type: ignore[override]
+        paths = self._local_paths_from_mime(event.mimeData())
+        if not paths:
+            super().dropEvent(event)
+            return
+        if self._apply_local_upload(paths, self.current_dir or "/"):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
 
     def _remote_parent_dir(self, remote_dir: str) -> str:
         cleaned = (remote_dir or "").rstrip("/")
@@ -555,7 +875,7 @@ class RemoteDirPanel(QWidget):
                 files.mkdir(target_path)
             else:
                 files.write_text(target_path, "")
-            self.refresh()
+            self._finish_remote_directory_mutation([target_dir])
             return True
         except Exception as e:
             show_exception(self, title=t("common.error"), user_message=str(e), exc=e, area="FILES")
@@ -563,6 +883,36 @@ class RemoteDirPanel(QWidget):
 
     def create_new_folder(self, parent_dir: Optional[str] = None) -> bool:
         return self._create_remote_item(kind="folder", parent_dir=parent_dir)
+
+    def create_new_folder_and_enter(self, parent_dir: Optional[str] = None) -> bool:
+        if not self.session or not self.session.get("files"):
+            QMessageBox.warning(self, t("common.error"), t("common.no_connection"))
+            return False
+        raw_target_dir = parent_dir or self.current_dir or ""
+        if not raw_target_dir:
+            QMessageBox.warning(self, t("common.error"), t("dirs.no_directory_selected"))
+            return False
+        target_dir = raw_target_dir.rstrip("/") or "/"
+        name = self._prompt_new_name(kind="folder")
+        if not name:
+            return False
+        target_path = self._child_path(target_dir, name)
+        files = self.session["files"]
+        try:
+            if files.exists(target_path):
+                QMessageBox.warning(
+                    self,
+                    t("dirs.conflict_title"),
+                    t("dirs.new_item_exists").format(path=target_path),
+            )
+                return False
+            files.mkdir(target_path)
+            self._finish_remote_directory_mutation([target_dir])
+            self.set_dir(target_path)
+            return True
+        except Exception as e:
+            show_exception(self, title=t("common.error"), user_message=str(e), exc=e, area="FILES")
+            return False
 
     def create_new_file(self, parent_dir: Optional[str] = None) -> bool:
         return self._create_remote_item(kind="file", parent_dir=parent_dir)
@@ -575,7 +925,7 @@ class RemoteDirPanel(QWidget):
         if is_dir:
             self.set_dir(path.rstrip("/") or "/")
             return
-        self.open_file.emit(path)
+        self.file_activated.emit(path)
 
     def go_parent(self):
         parent = self._remote_parent_dir(self.current_dir)
@@ -592,16 +942,16 @@ class RemoteDirPanel(QWidget):
             return st.standardIcon(QStyle.StandardPixmap.SP_DriveDVDIcon)
         return st.standardIcon(QStyle.StandardPixmap.SP_FileIcon)
 
-    def refresh(self):
+    def refresh(self, force: bool = False):
         if not self.session or not self.session.get("files"):
             for v in self.views.values():
                 v.clear()
             self._update_navigation_controls()
             return
 
-        files = self.session["files"]
+        category_dir = self._category_dir or self.current_dir
         try:
-            entries = files.listdir_entries(self.current_dir)
+            entries = self._listdir_entries_cached(category_dir, force=bool(force))
         except Exception as e:
             self._show_op_error(
                 f"{t('dirs.load_failed') if t('dirs.load_failed') != '[dirs.load_failed]' else 'Dizin okunamadı'}: {e}"
@@ -618,13 +968,18 @@ class RemoteDirPanel(QWidget):
             it.setText(0, entry.name)
             it.setIcon(0, self._icon_for(entry))
             it.setText(1, "" if entry.is_dir else _fmt_size(entry.size))
-            it.setText(2, _file_type(entry.name, entry.is_dir))
+            file_type = _file_type(entry.name, entry.is_dir)
+            it.setText(2, file_type)
             it.setText(3, _fmt_mtime(entry.mtime))
             it.setData(0, Qt.ItemDataRole.UserRole, entry.path)
             it.setData(0, Qt.ItemDataRole.UserRole + 1, bool(entry.is_dir))
+            it.setData(0, _SORT_NAME_ROLE, entry.name)
+            it.setData(0, _SORT_SIZE_ROLE, int(entry.size or 0))
+            it.setData(0, _SORT_TYPE_ROLE, file_type)
+            it.setData(0, _SORT_MTIME_ROLE, int(entry.mtime or 0))
             view.addTopLevelItem(it)
 
-        parent_dir = self._remote_parent_dir(self.current_dir)
+        parent_dir = self._remote_parent_dir(category_dir)
         if parent_dir:
             def make_parent_item() -> QTreeWidgetItem:
                 item = QTreeWidgetItem()
@@ -636,6 +991,10 @@ class RemoteDirPanel(QWidget):
                 item.setData(0, Qt.ItemDataRole.UserRole, parent_dir)
                 item.setData(0, Qt.ItemDataRole.UserRole + 1, True)
                 item.setData(0, Qt.ItemDataRole.UserRole + 2, True)
+                item.setData(0, _SORT_NAME_ROLE, "..")
+                item.setData(0, _SORT_SIZE_ROLE, 0)
+                item.setData(0, _SORT_TYPE_ROLE, _file_type("..", True))
+                item.setData(0, _SORT_MTIME_ROLE, 0)
                 return item
 
             self.views["all"].addTopLevelItem(make_parent_item())
@@ -649,6 +1008,7 @@ class RemoteDirPanel(QWidget):
                 add(self.views[cat], e)
 
         for v in self.views.values():
+            v.apply_sort()
             v.resizeColumnToContents(0)
             v.resizeColumnToContents(1)
             v.resizeColumnToContents(2)
@@ -717,6 +1077,7 @@ class RemoteDirPanel(QWidget):
         files = self.session["files"]
         # reverse order for safety
         moves = list(reversed(rec.moves))
+        affected_dirs = set()
 
         # build undo plan (dst -> src)
         plan: List[_PlannedOp] = []
@@ -726,6 +1087,8 @@ class RemoteDirPanel(QWidget):
             # undo means: move dst back to src
             undo_src = dst.rstrip("/")
             undo_dst = src.rstrip("/")
+            affected_dirs.add(self._parent_remote_dir(undo_src))
+            affected_dirs.add(self._parent_remote_dir(undo_dst))
 
             # if destination already exists, resolve
             try:
@@ -739,7 +1102,12 @@ class RemoteDirPanel(QWidget):
 
             if exists:
                 if policy is None:
-                    action = self._resolve_conflict(undo_dst)
+                    action = self._resolve_conflict(
+                        undo_dst,
+                        src=undo_src,
+                        source_is_local=False,
+                        target_is_local=False,
+                    )
                     if action.endswith("_all"):
                         policy = action.replace("_all", "")
                     action_simple = action.replace("_all", "")
@@ -771,17 +1139,13 @@ class RemoteDirPanel(QWidget):
             self._set_last_undo(None)
             return
 
-        ok = self._run_plan_with_progress(plan, "Geri alınıyor...")
+        def after_finished() -> None:
+            self._set_last_undo(None)
+            self._finish_remote_directory_mutation(affected_dirs)
+
+        ok = self._run_plan_with_progress(plan, "Geri alınıyor...", after_finished=after_finished)
         if not ok:
             return
-
-        self._set_last_undo(None)
-        # refresh all panels
-        for p in list(RemoteDirPanel._instances.values()):
-            try:
-                p.refresh()
-            except Exception:
-                pass
 
     # ---------- context menu ----------
     def _on_context_menu(self, view: QTreeWidget, pos: QPoint):
@@ -789,7 +1153,6 @@ class RemoteDirPanel(QWidget):
             return
 
         files = self.session.get("files")
-        clipboard = get_file_clipboard()
 
         item = view.itemAt(pos)
         clicked_path: Optional[str] = None
@@ -807,95 +1170,93 @@ class RemoteDirPanel(QWidget):
         elif not selected_items and clicked_path:
             selected_entries = [(clicked_path, clicked_is_dir)]
         sel_paths = [path for path, _is_dir in selected_entries]
-        submit_path = self._submit_candidate(selected_entries) if len(selected_items) <= 1 else ""
+        submit_path = self._submit_candidate(selected_entries)
 
         menu = QMenu(self)
+        clipboard = get_file_clipboard()
 
         new_parent_dir = clicked_path if clicked_path and clicked_is_dir else (self.current_dir or "/")
-        new_menu = menu.addMenu(t("dirs.new") if t("dirs.new") != "[dirs.new]" else "Yeni")
-        act_new_folder = new_menu.addAction(
-            t("dirs.new_folder") if t("dirs.new_folder") != "[dirs.new_folder]" else "Yeni Klasör"
-        )
-        act_new_file = new_menu.addAction(
-            t("dirs.new_file") if t("dirs.new_file") != "[dirs.new_file]" else "Yeni Dosya"
-        )
-        menu.addSeparator()
-
-        # Undo
-        act_undo = None
-        if RemoteDirPanel._last_undo is not None:
-            act_undo = menu.addAction(t("dirs.undo") if t("dirs.undo") != "[dirs.undo]" else "Geri Al")
-            menu.addSeparator()
-
-        # Optional output open actions (JobsOutputsWidget)
+        act_download = menu.addAction(REMOTE_CONTEXT_MENU_LABELS[0])
+        act_add_queue = menu.addAction(REMOTE_CONTEXT_MENU_LABELS[1])
+        act_view_edit = menu.addAction(REMOTE_CONTEXT_MENU_LABELS[2])
+        act_open_new_tab = menu.addAction(REMOTE_CONTEXT_MENU_LABELS[3])
+        act_submit = None
+        if submit_path:
+            act_submit = menu.addAction(_tr("dirs.submit_sbatch", "Submit with sbatch"))
         act_open_out1 = None
         act_open_out2 = None
-        if self.enable_output_menu and clicked_path and not clicked_is_dir:
+        if self.enable_output_menu:
             act_open_out1 = menu.addAction(
-                t("jobs_outputs.open_out1")
-                if t("jobs_outputs.open_out1") != "[jobs_outputs.open_out1]"
-                else "Çıktı 1'de takip et"
+                _tr("jobs_outputs.open_out1", "Follow in Output 1")
             )
             act_open_out2 = menu.addAction(
-                t("jobs_outputs.open_out2")
-                if t("jobs_outputs.open_out2") != "[jobs_outputs.open_out2]"
-                else "Çıktı 2'de takip et"
+                _tr("jobs_outputs.open_out2", "Follow in Output 2")
             )
-            menu.addSeparator()
-
-        # Paste actions
+        menu.addSeparator()
+        act_new_folder = menu.addAction(REMOTE_CONTEXT_MENU_LABELS[5])
+        act_new_folder_enter = menu.addAction(REMOTE_CONTEXT_MENU_LABELS[6])
+        act_new_file = menu.addAction(REMOTE_CONTEXT_MENU_LABELS[7])
+        act_refresh = menu.addAction(REMOTE_CONTEXT_MENU_LABELS[8])
+        menu.addSeparator()
         sys_clip = QApplication.clipboard().mimeData()
-        has_local_urls = bool(sys_clip and sys_clip.hasUrls() and any(u.isLocalFile() for u in sys_clip.urls()))
-
+        has_local_urls = bool(self._local_paths_from_mime(sys_clip))
         clip = clipboard.get()
+        act_paste_local_here = None
+        act_paste_local_into = None
         act_paste_here = None
         act_paste_into = None
         act_paste_to_local = None
-        act_paste_local_here = None
-        act_paste_local_into = None
-
-        # Local -> Remote paste (from OS clipboard)
+        act_undo = None
         if has_local_urls:
-            act_paste_local_here = menu.addAction(t("dirs.paste_from_local"))
-            if clicked_path and clicked_is_dir:
-                act_paste_local_into = menu.addAction(t("dirs.paste_from_local_into"))
-            menu.addSeparator()
-
-        # Remote -> Remote paste (internal clipboard)
-        if clip and clip.paths:
-            act_paste_here = menu.addAction(t("dirs.paste") if t("dirs.paste") != "[dirs.paste]" else "Yapıştır")
-            if clicked_path and clicked_is_dir:
-                act_paste_into = menu.addAction(t("dirs.paste_into") if t("dirs.paste_into") != "[dirs.paste_into]" else "Klasöre Yapıştır")
-            # Remote -> Local paste (download to a chosen local folder)
-            act_paste_to_local = menu.addAction(t("dirs.paste_to_local"))
-            menu.addSeparator()
-        act_submit = None
-        act_edit = act_download = act_rename = act_copy_path = None
-        act_copy = act_move = act_delete = None
-        if sel_paths:
-            if submit_path:
-                act_submit = menu.addAction(
-                    t("dirs.submit_sbatch")
-                    if t("dirs.submit_sbatch") != "[dirs.submit_sbatch]"
-                    else "Submit with sbatch"
-                )
-                menu.addSeparator()
-            act_edit = menu.addAction(t("dirs.edit") if t("dirs.edit") != "[dirs.edit]" else "Düzenle")
-            act_download = menu.addAction(t("dirs.download") if t("dirs.download") != "[dirs.download]" else "İndir")
-            menu.addSeparator()
-            act_rename = menu.addAction(t("dirs.rename") if t("dirs.rename") != "[dirs.rename]" else "Yeniden Adlandır")
-            act_copy_path = menu.addAction(
-                t("dirs.copy_path")
-                if t("dirs.copy_path") != "[dirs.copy_path]"
-                else "Dosyayla birlikte yolu kopyala"
+            act_paste_local_here = menu.addAction(
+                _tr("dirs.paste_from_local", "Paste from local")
             )
-            act_copy = menu.addAction(t("dirs.copy") if t("dirs.copy") != "[dirs.copy]" else "Kopyala")
-            act_move = menu.addAction(t("dirs.move") if t("dirs.move") != "[dirs.move]" else "Taşı")
+            if clicked_path and clicked_is_dir:
+                act_paste_local_into = menu.addAction(
+                    _tr("dirs.paste_from_local_into", "Paste from local into folder")
+                )
+        if clip and clip.paths:
+            act_paste_here = menu.addAction(_tr("dirs.paste", "Paste"))
+            if clicked_path and clicked_is_dir:
+                act_paste_into = menu.addAction(_tr("dirs.paste_into", "Paste into folder"))
+            act_paste_to_local = menu.addAction(
+                _tr("dirs.paste_to_local", "Paste to local (download)")
+            )
+        if RemoteDirPanel._last_undo is not None:
+            act_undo = menu.addAction(_tr("dirs.undo", "Undo"))
+        if any(
+            action is not None
+            for action in (
+                act_paste_local_here,
+                act_paste_here,
+                act_undo,
+            )
+        ):
             menu.addSeparator()
-            act_delete = menu.addAction(t("dirs.delete") if t("dirs.delete") != "[dirs.delete]" else "Sil")
-            if len(sel_paths) != 1:
-                act_edit.setEnabled(False)  # type: ignore[union-attr]
-                act_rename.setEnabled(False)  # type: ignore[union-attr]
+        act_delete = menu.addAction(REMOTE_CONTEXT_MENU_LABELS[10])
+        act_rename = menu.addAction(REMOTE_CONTEXT_MENU_LABELS[11])
+        act_copy_path = menu.addAction(REMOTE_CONTEXT_MENU_LABELS[12])
+        act_copy = menu.addAction(_tr("dirs.copy", "Copy"))
+        act_move = menu.addAction(_tr("dirs.move", "Move"))
+        act_permissions = menu.addAction(REMOTE_CONTEXT_MENU_LABELS[13])
+
+        has_selection = bool(sel_paths)
+        single_selection = len(sel_paths) == 1
+        single_selection_is_dir = bool(selected_entries[0][1]) if single_selection else False
+        act_download.setEnabled(has_selection)
+        act_add_queue.setEnabled(False)
+        act_view_edit.setEnabled(single_selection and not single_selection_is_dir)
+        act_open_new_tab.setEnabled(single_selection and single_selection_is_dir)
+        if act_open_out1 is not None:
+            act_open_out1.setEnabled(single_selection and not single_selection_is_dir)
+        if act_open_out2 is not None:
+            act_open_out2.setEnabled(single_selection and not single_selection_is_dir)
+        act_delete.setEnabled(has_selection)
+        act_rename.setEnabled(single_selection)
+        act_copy_path.setEnabled(has_selection)
+        act_copy.setEnabled(has_selection)
+        act_move.setEnabled(has_selection)
+        act_permissions.setEnabled(False)
 
         chosen = menu.exec(view.viewport().mapToGlobal(pos))
         if not chosen:
@@ -904,41 +1265,33 @@ class RemoteDirPanel(QWidget):
         if chosen == act_new_folder:
             self.create_new_folder(new_parent_dir)
             return
+        if chosen == act_new_folder_enter:
+            self.create_new_folder_and_enter(new_parent_dir)
+            return
         if chosen == act_new_file:
             self.create_new_file(new_parent_dir)
             return
-
-        if act_undo is not None and chosen == act_undo:
-            self.undo_last()
+        if chosen == act_refresh:
+            self.refresh(force=True)
             return
 
-        # Output actions
-        if act_open_out1 is not None and chosen == act_open_out1:
-            self.open_in_slot.emit(0, clicked_path)
-            return
-        if act_open_out2 is not None and chosen == act_open_out2:
-            self.open_in_slot.emit(1, clicked_path)
-            return
-
-        # Paste (Local -> Remote)
         if act_paste_local_here is not None and chosen == act_paste_local_here:
             self._paste_system_clipboard_into(self.current_dir or "/")
             return
         if act_paste_local_into is not None and chosen == act_paste_local_into and clicked_path:
             self._paste_system_clipboard_into(clicked_path)
             return
-
-        # Paste (Remote -> Remote)
         if act_paste_here is not None and chosen == act_paste_here:
             self._paste_remote_clipboard_into(self.current_dir or "/")
             return
         if act_paste_into is not None and chosen == act_paste_into and clicked_path:
             self._paste_remote_clipboard_into(clicked_path)
             return
-
-        # Paste (Remote -> Local)
         if act_paste_to_local is not None and chosen == act_paste_to_local:
             self._paste_remote_to_local()
+            return
+        if act_undo is not None and chosen == act_undo:
+            self.undo_last()
             return
 
         if not sel_paths:
@@ -948,8 +1301,7 @@ class RemoteDirPanel(QWidget):
             self.submit_requested.emit(submit_path)
             return
 
-        # Edit
-        if act_edit is not None and chosen == act_edit:
+        if chosen == act_view_edit:
             rp = sel_paths[0]
             try:
                 files.listdir(rp.rstrip("/"))
@@ -960,52 +1312,73 @@ class RemoteDirPanel(QWidget):
             self.open_file.emit(rp)
             return
 
-        # Download
-        if act_download is not None and chosen == act_download:
+        if chosen == act_open_new_tab and single_selection_is_dir:
+            self.open_directory_in_new_tab(sel_paths[0])
+            return
+
+        if act_open_out1 is not None and chosen == act_open_out1:
+            self.open_in_slot.emit(0, sel_paths[0])
+            return
+
+        if act_open_out2 is not None and chosen == act_open_out2:
+            self.open_in_slot.emit(1, sel_paths[0])
+            return
+
+        if chosen == act_download:
             self.download_selected()
             return
 
-        # Delete
-        if act_delete is not None and chosen == act_delete:
+        if chosen == act_delete:
             self._delete_paths(sel_paths)
             return
 
-        # Rename
-        if act_rename is not None and chosen == act_rename:
-            if len(sel_paths) != 1:
-                QMessageBox.information(self, t("common.info"), t("dirs.rename_single_required"))
-                return
-            old = sel_paths[0]
-            base = old.rstrip("/").split("/")[-1]
-            new_name, ok = QInputDialog.getText(
-                self,
-                t("dirs.rename") if t("dirs.rename") != "[dirs.rename]" else "Yeniden Adlandır",
-                t("dirs.rename_label"),
-                text=base,
-            )
-            if not ok or not new_name.strip():
-                return
-            parent = "/".join(old.rstrip("/").split("/")[:-1]) or "/"
-            dst = parent.rstrip("/") + "/" + new_name.strip()
-            try:
-                files.rename(old.rstrip("/"), dst)
-                self.refresh()
-            except Exception as e:
-                show_exception(self, title=t("common.error"), user_message=str(e), exc=e, area="FILES")
+        if chosen == act_rename:
+            self._rename_paths(sel_paths)
             return
 
-        # Copy remote path text to the system clipboard
-        if act_copy_path is not None and chosen == act_copy_path:
+        if chosen == act_copy_path:
             QApplication.clipboard().setText("\n".join(sel_paths))
             return
 
-        # Copy/Move into clipboard
-        if act_copy is not None and chosen == act_copy:
+        if chosen == act_copy:
             clipboard.set("copy", sel_paths)
             return
-        if act_move is not None and chosen == act_move:
+
+        if chosen == act_move:
             clipboard.set("move", sel_paths)
             return
+
+    def rename_selected(self, view: Optional[QTreeWidget] = None) -> bool:
+        if view is None:
+            current = self.tabs.currentWidget()
+            view = current if isinstance(current, QTreeWidget) else self.views["all"]
+        return self._rename_paths(self._selected_paths_from_view(view))
+
+    def _rename_paths(self, paths: List[str]) -> bool:
+        if not self.session or not self.session.get("files"):
+            return False
+        if len(paths) != 1:
+            QMessageBox.information(self, t("common.info"), t("dirs.rename_single_required"))
+            return False
+        old = paths[0].rstrip("/")
+        base = old.split("/")[-1]
+        new_name, ok = QInputDialog.getText(
+            self,
+            t("dirs.rename") if t("dirs.rename") != "[dirs.rename]" else "Yeniden Adlandır",
+            t("dirs.rename_label"),
+            text=base,
+        )
+        if not ok or not new_name.strip():
+            return False
+        parent = "/".join(old.split("/")[:-1]) or "/"
+        dst = parent.rstrip("/") + "/" + new_name.strip()
+        try:
+            self.session["files"].rename(old, dst)
+            self._finish_remote_directory_mutation([parent])
+            return True
+        except Exception as e:
+            show_exception(self, title=t("common.error"), user_message=str(e), exc=e, area="FILES")
+            return False
 
     # ---------- delete / paste ----------
     def _delete_paths(self, paths: List[str]) -> None:
@@ -1024,6 +1397,7 @@ class RemoteDirPanel(QWidget):
             msg,
         ) != QMessageBox.StandardButton.Yes:
             return
+        affected_dirs = set()
         for rp in paths:
             recursive = False
             try:
@@ -1035,7 +1409,9 @@ class RemoteDirPanel(QWidget):
                 except Exception:
                     recursive = rp.endswith("/")
             files.remove(rp.rstrip("/"), recursive=recursive)
-        self.refresh()
+            affected_dirs.add(self._parent_remote_dir(rp))
+        affected_dirs.add(self.current_dir or "/")
+        self._finish_remote_directory_mutation(affected_dirs)
 
     def delete_selected(self):
         tab = self.tabs.currentWidget()
@@ -1051,37 +1427,100 @@ class RemoteDirPanel(QWidget):
         self._delete_paths(sel)
 
     # ---------- conflict dialogs ----------
-    def _resolve_conflict(self, dst: str):
-        """Return one of: overwrite|skip|rename|cancel (optionally applied to all)."""
-        box = QMessageBox(self)
-        box.setIcon(QMessageBox.Icon.Question)
-        box.setWindowTitle(t("common.confirm"))
-        box.setText(t("dirs.conflict_message").format(path=dst))
-        overwrite_btn = box.addButton(t("dirs.conflict_overwrite"), QMessageBox.ButtonRole.AcceptRole)
-        skip_btn = box.addButton(t("dirs.conflict_skip"), QMessageBox.ButtonRole.DestructiveRole)
-        rename_btn = box.addButton(t("dirs.conflict_rename"), QMessageBox.ButtonRole.ActionRole)
-        cancel_btn = box.addButton(QMessageBox.StandardButton.Cancel)
-        box.setDefaultButton(overwrite_btn)
+    def _resolve_conflict(
+        self,
+        dst: str,
+        *,
+        src: str = "",
+        source_is_local: bool | None = None,
+        target_is_local: bool | None = None,
+    ):
+        """Return one of: overwrite|resume|skip|rename|cancel (optionally applied to all)."""
+        source = self._conflict_info(src or dst, is_local=source_is_local)
+        target = self._conflict_info(dst, is_local=target_is_local)
+        decision = TransferConflictDialog.get_decision(
+            self,
+            source=source,
+            target=target,
+        )
+        action = self._normalize_conflict_decision(decision, source, target)
+        apply_all = bool(decision.always_use or decision.apply_current_queue_only)
+        return action + "_all" if apply_all else action
 
-        cb = QCheckBox(t("common.apply_all"))
-        box.setCheckBox(cb)
+    def _conflict_info(
+        self,
+        path: str,
+        *,
+        is_local: bool | None = None,
+    ) -> TransferConflictInfo:
+        if is_local is True:
+            try:
+                st = os.stat(path)
+                return TransferConflictInfo(
+                    path=path,
+                    size=int(st.st_size),
+                    mtime=int(st.st_mtime),
+                )
+            except Exception:
+                return TransferConflictInfo(path=path)
+        if is_local is False and self.session and self.session.get("files"):
+            try:
+                size, mtime = self.session["files"].stat(path)
+                return TransferConflictInfo(
+                    path=path,
+                    size=int(size),
+                    mtime=int(mtime),
+                )
+            except Exception:
+                return TransferConflictInfo(path=path)
+        try:
+            if os.path.exists(path):
+                st = os.stat(path)
+                return TransferConflictInfo(
+                    path=path,
+                    size=int(st.st_size),
+                    mtime=int(st.st_mtime),
+                )
+        except Exception:
+            pass
+        if self.session and self.session.get("files"):
+            try:
+                size, mtime = self.session["files"].stat(path)
+                return TransferConflictInfo(
+                    path=path,
+                    size=int(size),
+                    mtime=int(mtime),
+                )
+            except Exception:
+                pass
+        return TransferConflictInfo(path=path)
 
-        box.exec()
-        clicked = box.clickedButton()
-        apply_all = bool(cb.isChecked())
-
-        def _ret(x: str) -> str:
-            return x + "_all" if apply_all else x
-
-        if clicked == cancel_btn:
-            return _ret("cancel")
-        if clicked == overwrite_btn:
-            return _ret("overwrite")
-        if clicked == skip_btn:
-            return _ret("skip")
-        if clicked == rename_btn:
-            return _ret("rename")
-        return _ret("cancel")
+    @staticmethod
+    def _normalize_conflict_decision(
+        decision: TransferConflictDecision,
+        source: TransferConflictInfo,
+        target: TransferConflictInfo,
+    ) -> str:
+        action = decision.action
+        if action in {"overwrite", "resume", "skip", "rename", "cancel"}:
+            return action
+        source_newer = (
+            source.mtime is not None
+            and target.mtime is not None
+            and int(source.mtime) > int(target.mtime)
+        )
+        size_differs = (
+            source.size is not None
+            and target.size is not None
+            and int(source.size) != int(target.size)
+        )
+        if action == "overwrite_if_newer":
+            return "overwrite" if source_newer else "skip"
+        if action == "overwrite_if_size_differs":
+            return "overwrite" if size_differs else "skip"
+        if action == "overwrite_if_size_differs_or_newer":
+            return "overwrite" if (size_differs or source_newer) else "skip"
+        return "cancel"
 
     def _prompt_rename(self, dst_dir: str, current_name: str) -> str | None:
         new_name, ok = QInputDialog.getText(self, "Yeniden adlandır", "Yeni ad:", text=current_name)
@@ -1158,12 +1597,32 @@ class RemoteDirPanel(QWidget):
             pass
 
     # ---------- plan runner ----------
-    def _run_plan_with_progress(self, plan: List[_PlannedOp], title: str) -> bool:
+    def _run_plan_with_progress(
+        self,
+        plan: List[_PlannedOp],
+        title: str,
+        after_finished=None,
+    ) -> bool:
         if not self.session or not self.session.get("files"):
             return False
         if not plan:
             return True
+        active_keys: set[tuple[str, str, str]] = set()
+        filtered_plan: List[_PlannedOp] = []
+        for op in plan:
+            key = self._transfer_key(op)
+            if key is not None:
+                if key in self._active_transfer_keys or key in active_keys:
+                    continue
+                active_keys.add(key)
+            filtered_plan.append(op)
+        if not filtered_plan:
+            return True
+        self._active_transfer_keys.update(active_keys)
+        plan = filtered_plan
         transfer_items = [TransferItem(op=p.op, src=p.src, dst=p.dst, recursive=p.recursive) for p in plan]
+        if self._transfer_activity_callback is not None:
+            self._transfer_activity_callback("queued", transfer_items, title)
         dlg = TransferDialog(
             self,
             title=title,
@@ -1171,23 +1630,43 @@ class RemoteDirPanel(QWidget):
             run_item=self._execute_transfer_item,
             parallel_limit=get_transfer_parallelism(),
         )
+        if self._transfer_activity_callback is not None:
+            self._transfer_activity_callback("controller", [dlg], title)
         self._active_plan = list(plan)
         self._active_step = 0
         self._active_title = title
-        dlg.start()
-        result = dlg.exec()
-        try:
-            if dlg.finished_cleanly():
-                return True
-            if result == QDialog.DialogCode.Rejected:
-                return False
-            return False
-        finally:
-            self._active_plan = []
-            self._active_step = 0
-            self._active_title = ""
+        def handle_finished(_result: int) -> None:
+            try:
+                if self._transfer_activity_callback is not None:
+                    event = "completed" if dlg.finished_cleanly() else "failed"
+                    self._transfer_activity_callback(event, transfer_items, title)
+                if dlg.finished_cleanly() and after_finished is not None:
+                    after_finished()
+            finally:
+                self._active_transfer_keys.difference_update(active_keys)
+                try:
+                    self._transfer_dialogs.remove(dlg)
+                except ValueError:
+                    pass
+                dlg.deleteLater()
 
-    def _execute_transfer_item(self, item: TransferItem) -> None:
+        dlg.finished.connect(handle_finished)
+        self._transfer_dialogs.append(dlg)
+        dlg.start()
+        if self._show_transfer_dialog:
+            dlg.show()
+        self._active_plan = []
+        self._active_step = 0
+        self._active_title = ""
+        return True
+
+    @staticmethod
+    def _transfer_key(op: _PlannedOp) -> tuple[str, str, str] | None:
+        if op.op not in {"upload", "download"}:
+            return None
+        return (op.op, op.src, op.dst)
+
+    def _execute_transfer_item(self, item: TransferItem, progress_cb=None) -> None:
         if not self.session or not self.session.get("files"):
             raise RuntimeError(t("common.no_connection"))
         files = self.session["files"]
@@ -1199,9 +1678,21 @@ class RemoteDirPanel(QWidget):
         elif op == "move":
             files.move(item.src, item.dst)
         elif op == "upload":
-            files.upload(item.src, item.dst)
+            upload_with_mode(
+                files,
+                item.src,
+                item.dst,
+                self._requested_transfer_mode(item.src),
+                progress_cb=progress_cb,
+            )
         elif op == "download":
-            files.download(item.src, item.dst)
+            download_with_mode(
+                files,
+                item.src,
+                item.dst,
+                self._requested_transfer_mode(item.src),
+                progress_cb=progress_cb,
+            )
         elif op == "mkdir_remote":
             files.mkdir(item.dst)
         elif op == "mkdir_local":
@@ -1320,7 +1811,12 @@ class RemoteDirPanel(QWidget):
 
                 if exists:
                     if policy is None:
-                        action = self._resolve_conflict(dst)
+                        action = self._resolve_conflict(
+                            dst,
+                            src=src_clean,
+                            source_is_local=False,
+                            target_is_local=False,
+                        )
                         if action.endswith("_all"):
                             policy = action.replace("_all", "")
                         action_simple = action.replace("_all", "")
@@ -1349,10 +1845,10 @@ class RemoteDirPanel(QWidget):
 
         return plan
 
-    def _apply_copy_move_with_conflicts(self, op: str, src_paths: List[str], dest_dir: str) -> None:
+    def _apply_copy_move_with_conflicts(self, op: str, src_paths: List[str], dest_dir: str) -> bool:
         plan = self._build_copy_move_plan_with_conflicts(op, src_paths, dest_dir)
         if plan is None:
-            return
+            return False
 
         title = "İşlem yapılıyor..."
         if op == "copy":
@@ -1360,15 +1856,25 @@ class RemoteDirPanel(QWidget):
         elif op == "move":
             title = "Taşınıyor..."
 
-        ok = self._run_plan_with_progress(plan, title)
+        affected_dirs = {self._normalize_remote_dir(dest_dir)}
+        if op == "move":
+            for src in src_paths:
+                affected_dirs.add(self._parent_remote_dir(src))
+
+        ok = self._run_plan_with_progress(
+            plan,
+            title,
+            after_finished=lambda: self._finish_remote_directory_mutation(affected_dirs),
+        )
         if not ok:
-            return
+            return False
 
         # store undo for move only
         if op == "move":
             moves: List[Tuple[str, str]] = [(p.src, p.dst) for p in plan if p.op == "move"]
             if moves:
                 self._set_last_undo(_UndoRecord(kind="move", moves=moves))
+        return True
 
     def _paste_remote_clipboard_into(self, dest_dir: str) -> None:
         if not self.session or not self.session.get("files"):
@@ -1385,9 +1891,8 @@ class RemoteDirPanel(QWidget):
 
         try:
             op = "copy" if clip.op == "copy" else "move"
-            self._apply_copy_move_with_conflicts(op, [s for s in clip.paths], dest_dir)
-            self.refresh()
-            if clip.op == "move":
+            ok = self._apply_copy_move_with_conflicts(op, [s for s in clip.paths], dest_dir)
+            if ok and clip.op == "move":
                 clipboard.clear()
         except Exception as e:
             show_exception(self, title=t("common.error"), user_message=str(e), exc=e, area="FILES")
@@ -1453,8 +1958,12 @@ class RemoteDirPanel(QWidget):
         plan: List[_PlannedOp] = []
         policy: Optional[str] = None
 
+        seen_sources: set[str] = set()
         for src in src_paths:
             src_clean = src.rstrip("/")
+            if not src_clean or src_clean in seen_sources:
+                continue
+            seen_sources.add(src_clean)
             name = os.path.basename(src_clean)
             local_dst = os.path.join(target_dir, name)
 
@@ -1467,7 +1976,12 @@ class RemoteDirPanel(QWidget):
             # conflict resolution on local target
             while os.path.exists(local_dst):
                 if policy is None:
-                    action = self._resolve_conflict(local_dst)
+                    action = self._resolve_conflict(
+                        local_dst,
+                        src=src_clean,
+                        source_is_local=False,
+                        target_is_local=True,
+                    )
                     if action.endswith("_all"):
                         policy = action.replace("_all", "")
                     action_simple = action.replace("_all", "")
@@ -1488,6 +2002,8 @@ class RemoteDirPanel(QWidget):
                     continue
                 if action_simple == "overwrite":
                     plan.append(_PlannedOp(op="delete_local", src="", dst=local_dst, recursive=is_dir))
+                    break
+                if action_simple == "resume":
                     break
 
             if not local_dst:
@@ -1529,8 +2045,14 @@ class RemoteDirPanel(QWidget):
         plan: List[_PlannedOp] = []
         policy: Optional[str] = None
 
+        seen_sources: set[str] = set()
         for lp in local_paths:
+            if not lp:
+                continue
             lp = os.path.abspath(lp)
+            if lp in seen_sources:
+                continue
+            seen_sources.add(lp)
             name = os.path.basename(lp.rstrip(os.sep))
             rp_base = dest_dir.rstrip("/") + "/" + name
             is_dir = os.path.isdir(lp)
@@ -1544,7 +2066,12 @@ class RemoteDirPanel(QWidget):
 
                 if exists:
                     if policy is None:
-                        action = self._resolve_conflict(rp_base)
+                        action = self._resolve_conflict(
+                            rp_base,
+                            src=lp,
+                            source_is_local=True,
+                            target_is_local=False,
+                        )
                         if action.endswith("_all"):
                             policy = action.replace("_all", "")
                         action_simple = action.replace("_all", "")
@@ -1569,6 +2096,8 @@ class RemoteDirPanel(QWidget):
                         except Exception:
                             isdir_remote = False
                         plan.append(_PlannedOp(op="delete", src="", dst=rp_base, recursive=isdir_remote))
+                    elif action_simple == "resume":
+                        pass
                 break
 
             if not rp_base:
@@ -1604,10 +2133,11 @@ class RemoteDirPanel(QWidget):
         if not plan:
             return True
 
-        ok = self._run_plan_with_progress(plan, "Yükleniyor...")
-        if ok:
-            self.refresh()
-        return ok
+        return self._run_plan_with_progress(
+            plan,
+            "Yükleniyor...",
+            after_finished=lambda: self._finish_remote_directory_mutation([dest_dir]),
+        )
 
     def _template_upload_path(self) -> Path:
         return Path(__file__).resolve().parents[4] / "templates" / "extract_iso.py"
@@ -1694,14 +2224,7 @@ class RemoteDirPanel(QWidget):
 
         try:
             op = "copy" if is_copy else "move"
-            self._apply_copy_move_with_conflicts(op, src_paths, dest_dir)
-
-            # refresh both panels (source + target)
-            self.refresh()
-            src_panel = RemoteDirPanel._instances.get(src_panel_id)
-            if src_panel is not None and src_panel is not self:
-                src_panel.refresh()
-            return True
+            return self._apply_copy_move_with_conflicts(op, src_paths, dest_dir)
         except Exception as e:
             show_exception(self, title=t("common.error"), user_message=str(e), exc=e, area="FILES")
             return False

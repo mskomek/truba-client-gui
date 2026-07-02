@@ -32,7 +32,20 @@ from truba_gui.services.terminal_emulator import TerminalEmulator
 from truba_gui.ui.widgets.terminal_input import TerminalInput
 from truba_gui.ui.dialogs.connection_dialog import ConnectionDialog
 
+import os
 import shiboken6
+
+
+FTP_TEST_MODE_ENV = "TRUBA_GUI_FTP_TEST_MODE"
+FTP_TEST_HOSTS = {"mock", "mock://ftp", "ftp-mock", "ftp_mock"}
+
+
+def is_ftp_test_mode_enabled() -> bool:
+    return os.environ.get(FTP_TEST_MODE_ENV, "").strip() == "1"
+
+
+def is_ftp_mock_host(host: str) -> bool:
+    return (host or "").strip().lower() in FTP_TEST_HOSTS
 
 
 class _TerminalConsole(QPlainTextEdit):
@@ -558,7 +571,14 @@ class LoginWidget(QWidget):
                     old_ssh.close()
                 except Exception:
                     pass
-            self._session = {"connected": True, "cfg": cfg, "ssh": ssh, "slurm": slurm, "files": files}
+            self._session = {
+                "connected": True,
+                "cfg": cfg,
+                "ssh": ssh,
+                "slurm": slurm,
+                "files": files,
+                "profile_name": self.profile_name.text().strip(),
+            }
             self.status_label.setText(t("login.status_connected") if t("login.status_connected") != "[login.status_connected]" else "Bağlı")
             self.cmd_in.set_connected(True)
             self.append_console("SSH bağlantısı kuruldu.")
@@ -912,7 +932,61 @@ class LoginWidget(QWidget):
         self.append_console(f"Profil kaydedildi: {name}")
         return True
 
+    def update_active_profile_remote_defaults(
+        self,
+        scratch_dir: str,
+        home_dir: str,
+    ) -> bool:
+        name = str(
+            (self._session or {}).get("profile_name")
+            or self.profile_name.text()
+            or ""
+        ).strip()
+        if not name:
+            return False
+        profile = self._load_profile_by_name(name)
+        if not profile:
+            return False
+        system = normalize_system_settings(profile.get("system"))
+        if scratch_dir.strip():
+            system["scratch_dir"] = scratch_dir.strip()
+        if home_dir.strip():
+            system["home_dir"] = home_dir.strip()
+        profile = dict(profile)
+        profile["system"] = system
+        upsert_profile(profile)
+        self._profile_system_settings = dict(system)
+        cfg = (self._session or {}).get("cfg")
+        if cfg is not None:
+            cfg.system_settings = dict(system)
+        self.refresh_profiles(select_name=name)
+        self.session_changed.emit(self._session)
+        return True
+
     # ---- connect / command
+    def _finish_mock_connection(self, cfg: SSHConfig, old_ssh) -> None:
+        if old_ssh is not None:
+            try:
+                old_ssh.close()
+            except Exception:
+                pass
+        ssh = None
+        slurm = MockSlurmBackend()
+        files = MockFilesBackend()
+        self._session = {
+            "connected": True,
+            "cfg": cfg,
+            "ssh": ssh,
+            "slurm": slurm,
+            "files": files,
+            "profile_name": self.profile_name.text().strip(),
+        }
+        self.status_label.setText(t("login.status_mock") if t("login.status_mock") != "[login.status_mock]" else "Mock mod")
+        self.cmd_in.set_connected(False)
+        self.append_console("Mock bağlantı aktif.")
+        append_event({"type": "connect", "host": cfg.host, "user": cfg.username, "dry_run": True})
+        self.session_changed.emit(self._session)
+
     def connect_clicked(self) -> bool:
         try:
             port = int(self.port.text().strip() or "22")
@@ -936,6 +1010,7 @@ class LoginWidget(QWidget):
                     if password is None:
                         return False
 
+        use_ftp_mock = is_ftp_test_mode_enabled() and is_ftp_mock_host(self.host.text())
         cfg = SSHConfig(
             host=self.host.text().strip(),
             port=port,
@@ -944,7 +1019,7 @@ class LoginWidget(QWidget):
             key_path=self.key_path.text().strip(),
             host_key_policy=("strict" if self.cb_strict_hostkey.isChecked() else "accept-new"),
             x11_forwarding=self.cb_x11.isChecked(),
-            dry_run=False,
+            dry_run=use_ftp_mock,
             system_settings=normalize_system_settings(
                 self._profile_system_settings
             ),
@@ -967,11 +1042,7 @@ class LoginWidget(QWidget):
         self.append_console(f"Bağlanılıyor: {target}:{cfg.port}")
         try:
             if cfg.dry_run:
-                ssh = None
-                slurm = MockSlurmBackend()
-                files = MockFilesBackend()
-                self.status_label.setText(t("login.status_mock") if t("login.status_mock") != "[login.status_mock]" else "Mock mod")
-                self.append_console("Mock bağlantı aktif.")
+                self._finish_mock_connection(cfg, old_ssh)
             else:
                 return self._begin_connect_async(cfg, old_ssh)
         except Exception as e:

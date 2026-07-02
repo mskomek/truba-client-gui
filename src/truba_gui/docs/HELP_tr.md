@@ -76,6 +76,29 @@ Geliştiriciler veya özelleştirme yapmak isteyenler için:
 
 ## TRUBA notları
 
+## Betik Editörü klavye kısayolları
+
+Kısayollar etkin olan dosya sekmesine uygulanır:
+
+| Kısayol | İşlem |
+|---|---|
+| `Ctrl+S` | Etkin dosyayı kaydet |
+| `Ctrl+Shift+S` | Etkin Slurm dosyasını kaydet ve gönder |
+| `Ctrl+Z` | Geri al |
+| `Ctrl+Y` | Yinele |
+| `Ctrl+X` | Kes |
+| `Ctrl+C` | Kopyala |
+| `Ctrl+V` | Yapıştır |
+| `Ctrl+A` | Tüm metni seç |
+| `Ctrl+F` | Etkin dosyada metin ara |
+| `F3` | Sonraki eşleşmeyi bul |
+| `Ctrl+O` | Uzak dosya yolu alanına git; Enter ile dosyayı aç |
+| `Ctrl+W` | Etkin dosya sekmesini kapat |
+| `Ctrl+Tab` | Sonraki dosya sekmesine geç |
+| `Ctrl+Shift+Tab` | Önceki dosya sekmesine geç |
+| `Page Up` / `Page Down` | Bir ekran yukarı/aşağı ilerle |
+| `End` | Dosyanın sonuna git |
+
 - TRUBA’da genellikle **Home** quota sınırlıdır, büyük işler için **Scratch** tercih edilir.
 - Scratch üzerinde temizleme/purge olabilir; dosyalar silinmişse GUI hata gösterebilir.
 

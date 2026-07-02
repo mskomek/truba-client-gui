@@ -4,7 +4,7 @@ import html
 import re
 import shlex
 
-from PySide6.QtCore import QThreadPool, QTimer, Signal
+from PySide6.QtCore import QThreadPool, QTimer, Signal, Qt
 from PySide6.QtGui import QFontDatabase, QTextCursor
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QPushButton, QTextEdit,
@@ -38,7 +38,24 @@ _ANSI_COLORS = {
     94: "#3b8eea", 95: "#d670d6", 96: "#29b8db", 97: "#ffffff",
 }
 _LIVE_TAIL_INTERVAL_MS = 1000
-_LIVE_TAIL_LINE_COUNT = 500
+_LIVE_TAIL_LINE_COUNT = 200
+
+
+class _NavigableTextEdit(QTextEdit):
+    def keyPressEvent(self, event) -> None:  # type: ignore[override]
+        if (
+            event.key() == Qt.Key.Key_End
+            and event.modifiers() == Qt.KeyboardModifier.NoModifier
+        ):
+            cursor = self.textCursor()
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+            self.setTextCursor(cursor)
+            self.ensureCursorVisible()
+            scrollbar = self.verticalScrollBar()
+            scrollbar.setValue(scrollbar.maximum())
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
 
 def _ansi_to_html(text: str) -> str:
@@ -203,6 +220,7 @@ class JobsOutputsWidget(QWidget):
         vg.addWidget(self.lbl_script)
         self.btn_tail_pause = QPushButton()
         self.btn_tail_pause.clicked.connect(self._toggle_tail_pause)
+        self.btn_tail_pause.setVisible(False)
         tail_controls = QHBoxLayout()
         tail_controls.addWidget(self.btn_tail_pause)
         tail_controls.addStretch(1)
@@ -220,7 +238,7 @@ class JobsOutputsWidget(QWidget):
         search_out_row = QHBoxLayout()
         search_out_row.addWidget(self.search_out)
         search_out_row.addWidget(self.btn_search_out)
-        self.txt_out = QTextEdit()
+        self.txt_out = _NavigableTextEdit()
         self.txt_out.setReadOnly(True)
         v1.addWidget(self.path_out)
         v1.addLayout(search_out_row)
@@ -238,7 +256,7 @@ class JobsOutputsWidget(QWidget):
         search_err_row = QHBoxLayout()
         search_err_row.addWidget(self.search_err)
         search_err_row.addWidget(self.btn_search_err)
-        self.txt_err = QTextEdit()
+        self.txt_err = _NavigableTextEdit()
         self.txt_err.setReadOnly(True)
         v2.addWidget(self.path_err)
         v2.addLayout(search_err_row)
@@ -354,7 +372,6 @@ class JobsOutputsWidget(QWidget):
         should_tail = bool(
             connected
             and self.is_outputs_polling_visible()
-            and not self._tail_paused
             and (self.active_out or self.active_err)
         )
         if should_tail:
@@ -656,10 +673,10 @@ class JobsOutputsWidget(QWidget):
     def _toggle_tail_pause(self) -> None:
         self._tail_paused = not self._tail_paused
         self._update_tail_pause_button()
-        if self._tail_paused:
-            self._live_timer.stop()
-            return
-        self._sync_polling(immediate=True)
+        if not self._tail_paused:
+            for widget in (self.txt_out, self.txt_err):
+                self._scroll_to_latest(widget)
+        self._sync_polling(immediate=not self._tail_paused)
 
     def _find_in_output(self, slot: int) -> None:
         search = self.search_out if slot == 0 else self.search_err
@@ -675,13 +692,41 @@ class JobsOutputsWidget(QWidget):
         output.find(query)
 
     @staticmethod
-    def _set_live_text(widget: QTextEdit, text: str) -> None:
-        widget.setPlainText(text)
+    def _scroll_to_latest(widget: QTextEdit) -> None:
+        cursor = widget.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        widget.setTextCursor(cursor)
+        widget.ensureCursorVisible()
+
+        def finish_scroll() -> None:
+            scrollbar = widget.verticalScrollBar()
+            scrollbar.setValue(scrollbar.maximum())
+
+        finish_scroll()
+        QTimer.singleShot(0, finish_scroll)
+
+    @staticmethod
+    def _is_scrolled_to_bottom(widget: QTextEdit) -> bool:
         scrollbar = widget.verticalScrollBar()
-        scrollbar.setValue(scrollbar.maximum())
+        return scrollbar.maximum() - scrollbar.value() <= 1
+
+    @staticmethod
+    def _set_live_text(
+        widget: QTextEdit,
+        text: str,
+        *,
+        follow_latest: bool,
+    ) -> None:
+        scrollbar = widget.verticalScrollBar()
+        previous_position = scrollbar.value()
+        widget.setPlainText(text)
+        if follow_latest:
+            JobsOutputsWidget._scroll_to_latest(widget)
+        else:
+            scrollbar.setValue(min(previous_position, scrollbar.maximum()))
 
     def _poll_live(self):
-        if self._tail_paused or not self.is_outputs_polling_visible():
+        if not self.is_outputs_polling_visible():
             self._live_timer.stop()
             return
         if not self.session:
@@ -730,6 +775,7 @@ class JobsOutputsWidget(QWidget):
                 if path != current_path:
                     continue
                 widget = self.txt_out if slot == 0 else self.txt_err
+                follow_latest = self._is_scrolled_to_bottom(widget)
                 if error:
                     kind_key = (
                         "jobs_outputs.output_kind"
@@ -742,9 +788,14 @@ class JobsOutputsWidget(QWidget):
                             kind=t(kind_key),
                             error=error,
                         ),
+                        follow_latest=follow_latest,
                     )
                 else:
-                    self._set_live_text(widget, text)
+                    self._set_live_text(
+                        widget,
+                        text,
+                        follow_latest=follow_latest,
+                    )
 
         self._start_async("tail", fetch, success)
 

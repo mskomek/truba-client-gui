@@ -89,6 +89,29 @@ Install & run:
 
 ## TRUBA notes
 
+## Script Editor keyboard shortcuts
+
+Shortcuts apply to the active document tab:
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl+S` | Save the active file |
+| `Ctrl+Shift+S` | Save and submit the active Slurm file |
+| `Ctrl+Z` | Undo |
+| `Ctrl+Y` | Redo |
+| `Ctrl+X` | Cut |
+| `Ctrl+C` | Copy |
+| `Ctrl+V` | Paste |
+| `Ctrl+A` | Select all text |
+| `Ctrl+F` | Find text in the active file |
+| `F3` | Find the next match |
+| `Ctrl+O` | Focus the remote path field; press Enter to open the file |
+| `Ctrl+W` | Close the active document tab |
+| `Ctrl+Tab` | Switch to the next document tab |
+| `Ctrl+Shift+Tab` | Switch to the previous document tab |
+| `Page Up` / `Page Down` | Move one screen up/down |
+| `End` | Move to the end of the file |
+
 - Prefer **Scratch** for large data and long runs.
 - Scratch may be periodically cleaned by the HPC administrators; keep important outputs in Home or project storage.
 

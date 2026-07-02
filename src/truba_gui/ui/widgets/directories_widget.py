@@ -4,7 +4,7 @@ import os
 import re
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal, Slot
+from PySide6.QtCore import QPoint, QObject, QRunnable, QThreadPool, Signal, Slot
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSplitter, QMessageBox,
     QDialog, QPushButton, QFileDialog, QInputDialog
@@ -45,6 +45,7 @@ class DirectoriesWidget(QWidget):
 
     def __init__(self):
         super().__init__()
+        self.setAcceptDrops(True)
         self.session = None
         self._submit_workers: set[_SubmitWorker] = set()
 
@@ -56,11 +57,11 @@ class DirectoriesWidget(QWidget):
         self.panel_scratch.submit_requested.connect(self.submit_script)
         self.panel_home.submit_requested.connect(self.submit_script)
 
-        splitter = QSplitter()
-        splitter.addWidget(self.panel_scratch)
-        splitter.addWidget(self.panel_home)
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 1)
+        self.splitter = QSplitter()
+        self.splitter.addWidget(self.panel_scratch)
+        self.splitter.addWidget(self.panel_home)
+        self.splitter.setStretchFactor(0, 1)
+        self.splitter.setStretchFactor(1, 1)
 
         self.btn_new_slurm = QPushButton(
             t("dirs.new_slurm_edit") if t("dirs.new_slurm_edit") != "[dirs.new_slurm_edit]" else "Create/Edit ARF Slurm"
@@ -73,7 +74,46 @@ class DirectoriesWidget(QWidget):
 
         lay = QVBoxLayout(self)
         lay.addLayout(top)
-        lay.addWidget(splitter)
+        lay.addWidget(self.splitter)
+
+    @staticmethod
+    def _local_paths_from_drop(event) -> list[str]:
+        mime = event.mimeData()
+        if not mime or not mime.hasUrls():
+            return []
+        return [url.toLocalFile() for url in mime.urls() if url.isLocalFile()]
+
+    def _panel_at_widget_pos(self, pos: QPoint) -> RemoteDirPanel:
+        for panel in (self.panel_scratch, self.panel_home):
+            top_left = panel.mapTo(self, QPoint(0, 0))
+            rect = panel.rect().translated(top_left)
+            if rect.contains(pos):
+                return panel
+        return self.panel_scratch
+
+    def dragEnterEvent(self, event) -> None:  # type: ignore[override]
+        if self._local_paths_from_drop(event):
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event) -> None:  # type: ignore[override]
+        if self._local_paths_from_drop(event):
+            event.acceptProposedAction()
+            return
+        super().dragMoveEvent(event)
+
+    def dropEvent(self, event) -> None:  # type: ignore[override]
+        paths = self._local_paths_from_drop(event)
+        if not paths:
+            super().dropEvent(event)
+            return
+        pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+        panel = self._panel_at_widget_pos(pos)
+        if panel._apply_local_upload(paths, panel.current_dir):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
 
     def set_session(self, session):
         self.session = session
