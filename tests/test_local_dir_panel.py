@@ -246,6 +246,40 @@ class LocalDirPanelTests(unittest.TestCase):
 
             self.assertIn("second.txt", self._names(self.panel))
 
+    def test_delete_removes_non_empty_local_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "recalculated"
+            nested = target / "nested"
+            nested.mkdir(parents=True)
+            (nested / "result.txt").write_text("data", encoding="utf-8")
+
+            self.assertTrue(self.panel.set_dir(str(root)))
+            self._select_name("recalculated")
+            with patch(
+                "truba_gui.ui.widgets.local_dir_panel.QMessageBox.question",
+                return_value=QMessageBox.StandardButton.Yes,
+            ):
+                self.assertTrue(self.panel.delete_selected())
+
+            self.assertFalse(target.exists())
+
+    def test_delete_key_removes_selected_local_item(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "delete-key.txt"
+            target.write_text("data", encoding="utf-8")
+
+            self.assertTrue(self.panel.set_dir(str(root)))
+            self._select_name("delete-key.txt")
+            with patch(
+                "truba_gui.ui.widgets.local_dir_panel.QMessageBox.question",
+                return_value=QMessageBox.StandardButton.Yes,
+            ):
+                self._press(Qt.Key.Key_Delete)
+
+            self.assertFalse(target.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

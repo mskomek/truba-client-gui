@@ -242,6 +242,10 @@ class _LocalTree(QTreeWidget):
             self._panel.refresh()
             event.accept()
             return
+        if event.key() == Qt.Key.Key_Delete and not event.modifiers():
+            if self._panel.delete_selected():
+                event.accept()
+                return
         super().keyPressEvent(event)
 
     def _move_current_for_key(self, key: Qt.Key) -> None:
@@ -651,7 +655,7 @@ class LocalDirPanel(QWidget):
         for path in paths:
             try:
                 if path.is_dir():
-                    path.rmdir()
+                    shutil.rmtree(path)
                 else:
                     path.unlink()
             except OSError as exc:

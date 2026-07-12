@@ -2548,16 +2548,54 @@ class RemoteDirPanel(QWidget):
                     for fn in files_ls:
                         lfile = os.path.join(root, fn)
                         rfile = rp_base + ("/" + rel_root if rel_root else "") + "/" + fn
-                        # overwrite within uploaded dir: best-effort overwrite
-                        try:
-                            if files.exists(rfile):
+                        while True:
+                            try:
+                                exists = bool(files.exists(rfile))
+                            except Exception:
+                                exists = False
+                            if not exists:
+                                break
+
+                            if policy is None:
+                                action = self._resolve_conflict(
+                                    rfile,
+                                    src=lfile,
+                                    source_is_local=True,
+                                    target_is_local=False,
+                                )
+                                if action.endswith("_all"):
+                                    policy = action.replace("_all", "")
+                                action_simple = action.replace("_all", "")
+                            else:
+                                action_simple = policy
+
+                            if action_simple == "cancel":
+                                return False
+                            if action_simple == "skip":
+                                rfile = None
+                                break
+                            if action_simple == "rename":
+                                new_dst = self._prompt_rename(
+                                    rfile.rsplit("/", 1)[0],
+                                    fn,
+                                )
+                                if not new_dst:
+                                    rfile = None
+                                    break
+                                rfile = new_dst
+                                continue
+                            if action_simple == "overwrite":
                                 try:
                                     isdir_remote = bool(files.is_dir(rfile))
                                 except Exception:
                                     isdir_remote = False
                                 plan.append(_PlannedOp(op="delete", src="", dst=rfile, recursive=isdir_remote))
-                        except Exception:
-                            pass
+                                break
+                            if action_simple == "resume":
+                                break
+                            break
+                        if not rfile:
+                            continue
                         plan.append(_PlannedOp(op="upload", src=lfile, dst=rfile))
 
         if not plan:

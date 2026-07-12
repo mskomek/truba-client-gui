@@ -165,6 +165,19 @@ def set_transfer_auto_refresh_enabled(enabled: bool) -> bool:
     return value
 
 
+def get_last_seen_changelog_version(default: str = "") -> str:
+    """Return the app version whose startup changelog was last acknowledged."""
+    value = load_settings().get("last_seen_changelog_version", default)
+    return str(value or "").strip()
+
+
+def set_last_seen_changelog_version(version: str) -> str:
+    """Persist that the startup changelog has been shown for a version."""
+    value = str(version or "").strip()
+    update_settings({"last_seen_changelog_version": value})
+    return value
+
+
 def get_ftp_transfer_type(default: str = "auto") -> str:
     value = str(load_settings().get("ftp_transfer_type", default)).strip().lower()
     return value if value in {"auto", "binary", "ascii"} else default

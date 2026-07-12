@@ -2,7 +2,7 @@ import webbrowser
 
 from PySide6.QtWidgets import (
     QApplication, QDialog, QMainWindow, QMessageBox, QProgressDialog, QSystemTrayIcon,
-    QTabWidget
+    QTabWidget, QTextEdit, QVBoxLayout, QPushButton
 )
 from PySide6.QtWidgets import (
     QMenu, QToolButton, QWidget, QSizePolicy, QHBoxLayout, QLabel
@@ -12,12 +12,15 @@ from PySide6.QtCore import QObject, QThread, QThreadPool, QTimer, Qt, QSize, Sig
 from PySide6.QtSvg import QSvgRenderer
 
 from truba_gui import __version__
-from truba_gui.core.paths import is_frozen_exe
-from truba_gui.core.i18n import t, set_language
 from truba_gui.config.storage import (
+    get_last_seen_changelog_version,
     get_sbatch_auto_open_outputs_enabled,
     get_sbatch_follow_mode,
+    set_last_seen_changelog_version,
 )
+from truba_gui.core.paths import is_frozen_exe
+from truba_gui.core.i18n import t, set_language
+from truba_gui.services.changelog import chronological_changelog, load_changelog_text
 from truba_gui.services.app_updater import (
     download_and_verify_release,
     get_latest_release,
@@ -157,6 +160,7 @@ class MainWindow(QMainWindow):
         )
         self.ftp.submitRequested.connect(self.directories.submit_script)
         self.editor.script_submitted.connect(self.on_script_submitted)
+        QTimer.singleShot(700, self._show_startup_changelog_if_needed)
         QTimer.singleShot(1500, lambda: self._check_for_updates(manual=False))
 
     def graceful_shutdown(self) -> None:
@@ -324,6 +328,39 @@ class MainWindow(QMainWindow):
                 self.ftp.apply_settings()
         except Exception:
             pass
+
+    def _show_startup_changelog_if_needed(self) -> None:
+        try:
+            if get_last_seen_changelog_version() == __version__:
+                return
+            text = chronological_changelog(load_changelog_text())
+            if not text:
+                set_last_seen_changelog_version(__version__)
+                return
+            self._show_changelog_dialog(text)
+            set_last_seen_changelog_version(__version__)
+        except Exception:
+            try:
+                set_last_seen_changelog_version(__version__)
+            except Exception:
+                pass
+
+    def _show_changelog_dialog(self, changelog_text: str) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle(t("updates.changelog_title").format(version=__version__))
+        dialog.resize(820, 640)
+
+        layout = QVBoxLayout(dialog)
+        text = QTextEdit(dialog)
+        text.setReadOnly(True)
+        text.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+        text.setMarkdown(changelog_text)
+        layout.addWidget(text, 1)
+
+        close_btn = QPushButton(t("common.close"), dialog)
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignRight)
+        dialog.exec()
 
     def _show_update_progress(self, value: int, status_key: str) -> None:
         if self._update_progress is None:

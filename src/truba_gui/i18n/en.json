@@ -102,7 +102,8 @@
     "status_ready": "The update is ready to install.",
     "status_installing": "Installing the update and restarting the application...",
     "error_title": "Update error",
-    "error_message": "The update could not be completed:\n{error}"
+    "error_message": "The update could not be completed:\n{error}",
+    "changelog_title": "What's new in v{version}"
   },
   "common": {
     "ok": "OK",

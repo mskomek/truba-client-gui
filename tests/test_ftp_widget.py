@@ -3469,6 +3469,43 @@ class FtpWidgetTests(unittest.TestCase):
         self.assertEqual(files.read_text("/arf/scratch/user/project/added.txt"), "added\n")
         self.assertEqual(files.read_text("/arf/scratch/user/project/keep.txt"), "keep\n")
 
+    def test_upload_folder_conflicts_ask_for_each_nested_file_without_apply_all(self) -> None:
+        files = _Files()
+        files.remote["/remote/folder/a.txt"] = b"old-a"
+        files.remote["/remote/folder/b.txt"] = b"old-b"
+        panel = self.widget.panel_scratch
+        panel.session = {"connected": True, "files": files}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp, "folder")
+            folder.mkdir()
+            (folder / "a.txt").write_text("new-a", encoding="utf-8")
+            (folder / "b.txt").write_text("new-b", encoding="utf-8")
+
+            with (
+                patch.object(
+                    panel,
+                    "_resolve_conflict",
+                    side_effect=["overwrite", "overwrite"],
+                ) as resolve,
+                patch.object(panel, "_run_plan_with_progress", return_value=True) as run_plan,
+            ):
+                self.assertTrue(panel._apply_local_upload([str(folder)], "/remote"))
+
+        self.assertEqual(resolve.call_count, 2)
+        self.assertEqual(
+            [call.args[0] for call in resolve.call_args_list],
+            ["/remote/folder/a.txt", "/remote/folder/b.txt"],
+        )
+        plan = run_plan.call_args.args[0]
+        self.assertEqual(
+            [(item.op, item.dst) for item in plan if item.op == "delete"],
+            [
+                ("delete", "/remote/folder/a.txt"),
+                ("delete", "/remote/folder/b.txt"),
+            ],
+        )
+
     def test_active_download_plan_is_not_queued_twice(self) -> None:
         panel = self.widget.panel_scratch
         panel.session = {"connected": True, "files": _Files()}

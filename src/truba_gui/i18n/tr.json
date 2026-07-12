@@ -100,7 +100,8 @@
     "status_ready": "Güncelleme kuruluma hazır.",
     "status_installing": "Güncelleme yükleniyor ve uygulama yeniden başlatılıyor...",
     "error_title": "Güncelleme hatası",
-    "error_message": "Güncelleme tamamlanamadı:\n{error}"
+    "error_message": "Güncelleme tamamlanamadı:\n{error}",
+    "changelog_title": "v{version} yenilikleri"
   },
   "common": {
     "ok": "Tamam",
