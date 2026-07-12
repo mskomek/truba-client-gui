@@ -14,14 +14,14 @@ class LogsWidget(QWidget):
         self.setObjectName("LogsWidget")
         self._last_signature = None
 
-        self.lbl = QLabel(t("logs.title") if t("logs.title") != "[logs.title]" else "Logs")
+        self.lbl = QLabel(t("logs.title"))
         self.txt = QTextEdit()
         self.txt.setReadOnly(True)
 
-        self.btn_refresh = QPushButton(t("logs.refresh") if t("logs.refresh") != "[logs.refresh]" else "Yenile")
+        self.btn_refresh = QPushButton(t("logs.refresh"))
         self.btn_refresh.clicked.connect(self.refresh)
 
-        self.btn_copy = QPushButton(t("logs.copy") if t("logs.copy") != "[logs.copy]" else "Kopyala")
+        self.btn_copy = QPushButton(t("logs.copy"))
         self.btn_copy.clicked.connect(self.copy_all)
 
         self.btn_copy_path = QPushButton(t("logs.copy_path"))

@@ -18,6 +18,8 @@ def _norm(path: str) -> str:
 
 
 class MockFilesBackend(FilesBackend):
+    supports_parallel_transfers = True
+
     def __init__(self):
         now = int(time.time())
         self._files: Dict[str, bytes] = {

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from time import monotonic
 
 from PySide6.QtCore import QTimer, Qt, Signal
@@ -23,6 +24,8 @@ from PySide6.QtWidgets import (
 from truba_gui.config.storage import (
     get_ftp_state,
     get_ftp_transfer_type,
+    get_transfer_auto_refresh_enabled,
+    get_transfer_parallelism,
     update_ftp_state,
 )
 from truba_gui.config.system_profile import format_remote_path, normalize_system_settings
@@ -38,29 +41,24 @@ from truba_gui.ui.widgets.remote_accordion import RemoteAccordion
 from truba_gui.ui.widgets.remote_dir_panel import RemoteDirPanel
 
 
-def _tr(key: str, fallback: str) -> str:
-    value = t(key)
-    return fallback if value == f"[{key}]" else value
-
-
 class TransferActivityPanel(QGroupBox):
-    _COLUMNS = [
-        "Server/Local file",
-        "Direction",
-        "Remote file",
-        "Size",
-        "Progress",
-        "Priority",
-        "Status",
+    _COLUMN_KEYS = [
+        "transfer.column_server_local_file",
+        "transfer.column_direction",
+        "transfer.column_remote_file",
+        "transfer.column_size",
+        "transfer.column_progress",
+        "transfer.column_priority",
+        "transfer.column_status",
     ]
     _PROGRESS_COLUMN = 4
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._controller = None
-        self._last_status_text = _tr("transfer.no_active_transfer", "No active transfer.")
+        self._last_status_text = t("transfer.no_active_transfer")
         self._progress_by_item: dict[int, int] = {}
-        self.status_label = QLabel(_tr("transfer.no_active_transfer", "No active transfer."))
+        self.status_label = QLabel(t("transfer.no_active_transfer"))
         self.summary_label = QLabel()
         self.tabs = QTabWidget()
         self.tabs.setTabPosition(QTabWidget.TabPosition.South)
@@ -73,15 +71,17 @@ class TransferActivityPanel(QGroupBox):
             self.completed_list,
         ):
             view.setMinimumHeight(92)
-        self.tabs.addTab(self.queue_list, _tr("transfer.queue_tab", "Queue"))
-        self.tabs.addTab(self.failed_list, _tr("transfer.failed_tab", "Failed"))
-        self.tabs.addTab(self.completed_list, _tr("transfer.completed_tab", "Completed"))
+        self.tabs.addTab(self.queue_list, t("transfer.queue_tab"))
+        self.tabs.addTab(self.failed_list, t("transfer.failed_tab"))
+        self.tabs.addTab(self.completed_list, t("transfer.completed_tab"))
         self.queue_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.queue_list.customContextMenuRequested.connect(self._show_queue_menu)
+        self.failed_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.failed_list.customContextMenuRequested.connect(self._show_failed_menu)
 
-        self.btn_stop = QPushButton(_tr("transfer.stop", "Stop"))
-        self.btn_cancel = QPushButton(_tr("transfer.cancel", "Cancel"))
-        self.btn_clear_pending = QPushButton(_tr("transfer.clear_pending", "Clear queued"))
+        self.btn_stop = QPushButton(t("transfer.stop"))
+        self.btn_cancel = QPushButton(t("transfer.cancel"))
+        self.btn_clear_pending = QPushButton(t("transfer.clear_pending"))
         self.btn_stop.clicked.connect(lambda: self._call_controller("stop_after_current"))
         self.btn_cancel.clicked.connect(lambda: self._call_controller("cancel_all"))
         self.btn_clear_pending.clicked.connect(lambda: self._call_controller("clear_pending"))
@@ -102,8 +102,8 @@ class TransferActivityPanel(QGroupBox):
 
     def _make_transfer_table(self) -> QTreeWidget:
         view = QTreeWidget()
-        view.setColumnCount(len(self._COLUMNS))
-        view.setHeaderLabels(self._COLUMNS)
+        view.setColumnCount(len(self._COLUMN_KEYS))
+        view.setHeaderLabels([t(key) for key in self._COLUMN_KEYS])
         view.setRootIsDecorated(True)
         view.setAlternatingRowColors(True)
         view.setUniformRowHeights(False)
@@ -111,17 +111,19 @@ class TransferActivityPanel(QGroupBox):
         return view
 
     def retranslate_ui(self) -> None:
-        self.setTitle(_tr("transfer.ftp_activity_title", "Transfers"))
+        self.setTitle(t("transfer.ftp_activity_title"))
+        for view in (self.queue_list, self.failed_list, self.completed_list):
+            view.setHeaderLabels([t(key) for key in self._COLUMN_KEYS])
         labels = (
-            self._tab_label("Queued files", self.queue_list.topLevelItemCount()),
-            self._tab_label("Failed transfers", self.failed_list.topLevelItemCount()),
-            self._tab_label("Successful transfers", self.completed_list.topLevelItemCount()),
+            self._tab_label(t("transfer.queued_files"), self.queue_list.topLevelItemCount()),
+            self._tab_label(t("transfer.failed_transfers"), self.failed_list.topLevelItemCount()),
+            self._tab_label(t("transfer.successful_transfers"), self.completed_list.topLevelItemCount()),
         )
         for index, label in enumerate(labels):
             self.tabs.setTabText(index, label)
-        self.btn_stop.setText(_tr("transfer.stop", "Stop"))
-        self.btn_cancel.setText(_tr("transfer.cancel", "Cancel"))
-        self.btn_clear_pending.setText(_tr("transfer.clear_pending", "Clear queued"))
+        self.btn_stop.setText(t("transfer.stop"))
+        self.btn_cancel.setText(t("transfer.cancel"))
+        self.btn_clear_pending.setText(t("transfer.clear_pending"))
 
     @staticmethod
     def _item_label(item) -> str:
@@ -134,22 +136,29 @@ class TransferActivityPanel(QGroupBox):
             return f"{op}: {name or dst}"
 
     @staticmethod
-    def _format_size(size: int) -> str:
-        try:
-            value = float(size)
-        except Exception:
+    def _format_size(size: int | None) -> str:
+        if size is None:
             return ""
-        units = ("bytes", "KB", "MB", "GB", "TB")
+        value = float(size)
+        units = (t("units.bytes"), "KB", "MB", "GB", "TB")
         index = 0
         while value >= 1024 and index < len(units) - 1:
             value /= 1024.0
             index += 1
         if index == 0:
-            return f"{int(value):,} bytes"
+            return f"{int(value):,} {t('units.bytes')}"
         return f"{value:.1f} {units[index]}"
 
     @classmethod
-    def _item_size(cls, item) -> int:
+    def _item_size(cls, item) -> int | None:
+        try:
+            explicit_size = getattr(item, "size", None)
+            if explicit_size is not None:
+                return max(0, int(explicit_size))
+        except Exception:
+            pass
+        if getattr(item, "op", "") == "download_tree":
+            return None
         path = getattr(item, "src", "") if getattr(item, "op", "") == "upload" else getattr(item, "dst", "")
         try:
             from pathlib import Path
@@ -157,7 +166,7 @@ class TransferActivityPanel(QGroupBox):
             local = Path(path)
             return local.stat().st_size if local.exists() and local.is_file() else 0
         except Exception:
-            return 0
+            return None
 
     @classmethod
     def _item_columns(cls, item, status: str) -> list[str]:
@@ -166,7 +175,7 @@ class TransferActivityPanel(QGroupBox):
         dst = str(getattr(item, "dst", "") or "")
         if op == "upload":
             local_file, remote_file, direction = src, dst, "-->"
-        elif op == "download":
+        elif op in {"download", "download_tree"}:
             local_file, remote_file, direction = dst, src, "<--"
         else:
             local_file, remote_file, direction = src, dst, "->"
@@ -176,7 +185,7 @@ class TransferActivityPanel(QGroupBox):
             remote_file,
             cls._format_size(cls._item_size(item)),
             "",
-            "Normal",
+            t("transfer.priority_normal"),
             status,
         ]
 
@@ -185,7 +194,7 @@ class TransferActivityPanel(QGroupBox):
         return [
             item
             for item in list(items or [])
-            if getattr(item, "op", "") in {"upload", "download"}
+            if getattr(item, "op", "") in {"upload", "download", "download_tree"}
         ]
 
     @staticmethod
@@ -193,9 +202,15 @@ class TransferActivityPanel(QGroupBox):
         return f"{label} ({count})"
 
     def _update_summary(self, items: list) -> None:
-        total_size = sum(self._item_size(item) for item in items)
+        sizes = [self._item_size(item) for item in items]
+        known_size = sum(size for size in sizes if size is not None)
+        if items and any(size is None for size in sizes):
+            self.summary_label.setText(
+                t("transfer.summary_calculating").format(count=len(items))
+            )
+            return
         self.summary_label.setText(
-            f"{len(items)} files. Total size: {total_size:,} bytes"
+            t("transfer.summary_total").format(count=len(items), size=f"{known_size:,}")
         )
 
     def _add_transfer_row(
@@ -216,7 +231,7 @@ class TransferActivityPanel(QGroupBox):
         return row
 
     def _progress_value(self, item, status: str) -> int:
-        if status == "Successful":
+        if status == t("transfer.status_successful"):
             return 100
         return max(0, min(100, int(self._progress_by_item.get(id(item), 0))))
 
@@ -242,7 +257,7 @@ class TransferActivityPanel(QGroupBox):
             self.queue_list.clear()
             visible_items = self._visible_transfer_items(items)
             for item in visible_items:
-                self._add_transfer_row(self.queue_list, item, "Queued")
+                self._add_transfer_row(self.queue_list, item, t("transfer.status_queued"))
             self._update_summary(visible_items)
             self.retranslate_ui()
             self.tabs.setCurrentWidget(self.queue_list)
@@ -250,7 +265,7 @@ class TransferActivityPanel(QGroupBox):
         if event == "completed":
             self.queue_list.clear()
             for item in self._visible_transfer_items(items):
-                self._add_transfer_row(self.completed_list, item, "Successful")
+                self._add_transfer_row(self.completed_list, item, t("transfer.status_successful"))
             self._update_summary([])
             self.retranslate_ui()
             self.tabs.setCurrentWidget(self.completed_list)
@@ -258,7 +273,7 @@ class TransferActivityPanel(QGroupBox):
         if event == "failed":
             self.queue_list.clear()
             for item in self._visible_transfer_items(items):
-                self._add_transfer_row(self.failed_list, item, "Failed", title)
+                self._add_transfer_row(self.failed_list, item, t("transfer.status_failed"), title)
             self._update_summary([])
             self.retranslate_ui()
             self.tabs.setCurrentWidget(self.failed_list)
@@ -273,6 +288,13 @@ class TransferActivityPanel(QGroupBox):
             controller.finished.connect(lambda _result: self._set_controls_enabled(False))
         except Exception:
             pass
+
+    def apply_parallel_limit(self, parallel_limit: int) -> None:
+        if self._controller is None:
+            return
+        setter = getattr(self._controller, "set_parallel_limit", None)
+        if callable(setter):
+            setter(parallel_limit)
 
     def _set_status_text(self, text: str) -> None:
         self._last_status_text = text or ""
@@ -313,19 +335,19 @@ class TransferActivityPanel(QGroupBox):
             self._add_transfer_row(
                 self.queue_list,
                 active,
-                "Transferring",
+                t("transfer.status_transferring"),
                 self._last_status_text,
             )
         for item in self._visible_transfer_items(pending):
             queue_items.append(item)
-            self._add_transfer_row(self.queue_list, item, "Queued")
+            self._add_transfer_row(self.queue_list, item, t("transfer.status_queued"))
         self.failed_list.clear()
         for item, err in errors:
             if getattr(item, "op", "") in {"upload", "download"}:
-                self._add_transfer_row(self.failed_list, item, "Failed", str(err))
+                self._add_transfer_row(self.failed_list, item, t("transfer.status_failed"), str(err))
         self.completed_list.clear()
         for item in self._visible_transfer_items(completed):
-            self._add_transfer_row(self.completed_list, item, "Successful")
+            self._add_transfer_row(self.completed_list, item, t("transfer.status_successful"))
         self._update_summary(queue_items)
         self.retranslate_ui()
 
@@ -336,30 +358,60 @@ class TransferActivityPanel(QGroupBox):
         if callable(action):
             action()
 
+    def _selected_queue_items(self) -> list:
+        items = []
+        for row in self.queue_list.selectedItems():
+            item = row.data(0, Qt.ItemDataRole.UserRole)
+            if item is not None and getattr(item, "op", "") in {"upload", "download", "download_tree"}:
+                items.append(item)
+        return items
+
+    def _remove_selected_queue_items(self) -> None:
+        if self._controller is None:
+            return
+        items = self._selected_queue_items()
+        if not items:
+            return
+        remover = getattr(self._controller, "remove_pending_items", None)
+        if callable(remover):
+            remover(items)
+
     def _show_queue_menu(self, pos) -> None:
         menu = QMenu(self)
-        act_process = menu.addAction("Process Queue")
+        act_process = menu.addAction(t("transfer.menu_process_queue"))
         act_process.setCheckable(True)
         act_process.setChecked(bool(self._controller))
-        act_stop_remove = menu.addAction("Stop and remove all")
+        act_stop_remove = menu.addAction(t("transfer.menu_stop_remove_all"))
         menu.addSeparator()
-        act_remove_selected = menu.addAction("Remove selected")
-        act_default_exists = menu.addAction("Default file exists action...")
-        act_priority = menu.addMenu("Set Priority")
-        act_priority.addAction("Highest").setEnabled(False)
-        act_priority.addAction("High").setEnabled(False)
-        act_priority.addAction("Normal").setEnabled(False)
-        act_priority.addAction("Low").setEnabled(False)
-        act_after = menu.addMenu("Action after queue completion")
-        act_after.addAction("None").setEnabled(False)
-        act_export = menu.addAction("Export...")
+        act_remove_selected = menu.addAction(t("transfer.menu_remove_selected"))
+        act_default_exists = menu.addAction(t("transfer.menu_default_exists_action"))
+        act_priority = menu.addMenu(t("transfer.menu_set_priority"))
+        act_priority.addAction(t("transfer.priority_highest")).setEnabled(False)
+        act_priority.addAction(t("transfer.priority_high")).setEnabled(False)
+        act_priority.addAction(t("transfer.priority_normal")).setEnabled(False)
+        act_priority.addAction(t("transfer.priority_low")).setEnabled(False)
+        act_after = menu.addMenu(t("transfer.menu_after_completion"))
+        act_after.addAction(t("transfer.menu_none")).setEnabled(False)
+        act_export = menu.addAction(t("transfer.menu_export"))
         act_default_exists.setEnabled(False)
         act_export.setEnabled(False)
         chosen = menu.exec(self.queue_list.viewport().mapToGlobal(pos))
         if chosen == act_stop_remove:
             self._call_controller("cancel_all")
         elif chosen == act_remove_selected:
-            self._call_controller("clear_pending")
+            self._remove_selected_queue_items()
+
+    def _show_failed_menu(self, pos) -> None:
+        item = self.failed_list.itemAt(pos)
+        if item is not None:
+            self.failed_list.setCurrentItem(item)
+        if not self.failed_list.selectedItems():
+            return
+        menu = QMenu(self)
+        act_retry = menu.addAction(t("transfer.retry_selected"))
+        chosen = menu.exec(self.failed_list.viewport().mapToGlobal(pos))
+        if chosen == act_retry:
+            self._call_controller("retry_selected_errors")
 
     def _set_controls_enabled(self, enabled: bool) -> None:
         self.btn_stop.setEnabled(enabled)
@@ -372,6 +424,7 @@ class FtpWidget(QWidget):
 
     defaultPathsRequested = Signal(str, str)
     openFileRequested = Signal(str)
+    openFileInNewWindowRequested = Signal(str)
     submitRequested = Signal(str)
 
     def __init__(self, parent=None) -> None:
@@ -387,6 +440,18 @@ class FtpWidget(QWidget):
         self.panel_home = RemoteDirPanel()
         self.panel_scratch.set_transfer_mode_provider(self.current_transfer_mode)
         self.panel_home.set_transfer_mode_provider(self.current_transfer_mode)
+        self.panel_scratch.set_default_download_dir_provider(
+            lambda: self.local_panel.current_dir
+        )
+        self.panel_home.set_default_download_dir_provider(
+            lambda: self.local_panel.current_dir
+        )
+        self.panel_scratch.set_download_finished_callback(
+            self._refresh_local_target_after_download
+        )
+        self.panel_home.set_download_finished_callback(
+            self._refresh_local_target_after_download
+        )
         self.panel_scratch.set_transfer_dialog_visible(False)
         self.panel_home.set_transfer_dialog_visible(False)
         self.transfer_activity = TransferActivityPanel()
@@ -396,6 +461,12 @@ class FtpWidget(QWidget):
         self.panel_home.set_transfer_activity_callback(self.transfer_activity.record)
         self.panel_scratch.open_file.connect(self.openFileRequested)
         self.panel_home.open_file.connect(self.openFileRequested)
+        self.panel_scratch.open_file_in_new_window.connect(
+            self.openFileInNewWindowRequested
+        )
+        self.panel_home.open_file_in_new_window.connect(
+            self.openFileInNewWindowRequested
+        )
         self.panel_scratch.file_activated.connect(self._download_remote_path)
         self.panel_home.file_activated.connect(self._download_remote_path)
         self.panel_scratch.submit_requested.connect(self.submitRequested)
@@ -522,6 +593,7 @@ class FtpWidget(QWidget):
         mode = get_ftp_transfer_type()
         index = self.mode_combo.findData(mode)
         self.mode_combo.setCurrentIndex(max(0, index))
+        self.transfer_activity.apply_parallel_limit(get_transfer_parallelism())
         if hasattr(self, "effective_label"):
             self._update_effective_label()
 
@@ -598,6 +670,26 @@ class FtpWidget(QWidget):
         finally:
             self.apply_settings()
 
+    def _refresh_local_target_after_download(self, target_dir: str) -> None:
+        if not get_transfer_auto_refresh_enabled():
+            return
+        target = os.path.abspath(target_dir or "")
+        current = os.path.abspath(self.local_panel.current_dir or "")
+        if target and target == current:
+            self.local_panel.refresh()
+
+    def _download_to_local_target(
+        self,
+        panel: RemoteDirPanel,
+        paths: list[str],
+        target_dir: str,
+    ) -> bool:
+        return panel._apply_remote_download(
+            paths,
+            target_dir,
+            after_finished=lambda: self._refresh_local_target_after_download(target_dir),
+        )
+
     def _upload_local_path(self, path: str) -> None:
         panel = self.active_remote_panel()
         if self._is_repeated_activation_transfer("upload", path, panel.current_dir):
@@ -624,7 +716,11 @@ class FtpWidget(QWidget):
             QMessageBox.warning(self, t("common.error"), t("common.no_connection"))
             return False
         try:
-            return panel._apply_remote_download(paths, self.local_panel.current_dir)
+            return self._download_to_local_target(
+                panel,
+                paths,
+                self.local_panel.current_dir,
+            )
         finally:
             self.apply_settings()
 
@@ -635,7 +731,7 @@ class FtpWidget(QWidget):
         if self._is_repeated_activation_transfer("download", path, self.local_panel.current_dir):
             return
         try:
-            panel._apply_remote_download([path], self.local_panel.current_dir)
+            self._download_to_local_target(panel, [path], self.local_panel.current_dir)
         finally:
             self.apply_settings()
 
@@ -662,7 +758,7 @@ class FtpWidget(QWidget):
         if panel is None or panel not in (self.panel_scratch, self.panel_home):
             QMessageBox.warning(self, t("common.error"), t("ftp.invalid_drop"))
             return
-        panel._apply_remote_download(paths, self.local_panel.current_dir)
+        self._download_to_local_target(panel, paths, self.local_panel.current_dir)
 
     def _download_remote_clipboard_paths(
         self,
@@ -674,7 +770,7 @@ class FtpWidget(QWidget):
         if not clean_paths or not self.session or not self.session.get("connected"):
             return
         try:
-            panel._apply_remote_download(clean_paths, target_dir)
+            self._download_to_local_target(panel, clean_paths, target_dir)
         finally:
             self.apply_settings()
 

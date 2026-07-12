@@ -17,12 +17,12 @@ VSVersionInfo(
         [
           StringStruct('CompanyName', 'Unofficial / Community'),
           StringStruct('FileDescription', 'TRUBA Client GUI (Slurm/SSH/X11 helper)'),
-          StringStruct('FileVersion', '1.1.8'),
+          StringStruct('FileVersion', '1.1.9'),
           StringStruct('InternalName', 'truba-client-gui'),
           StringStruct('LegalCopyright', 'Copyright (c) 2026'),
           StringStruct('OriginalFilename', 'truba-client-gui.exe'),
           StringStruct('ProductName', 'TRUBA Client GUI'),
-          StringStruct('ProductVersion', '1.1.8'),
+          StringStruct('ProductVersion', '1.1.9'),
         ]
       )
     ]),

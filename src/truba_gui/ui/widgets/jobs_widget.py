@@ -10,13 +10,13 @@ class JobsWidget(QWidget):
         self.out = QTextEdit()
         self.out.setReadOnly(True)
 
-        self.btn_refresh = QPushButton(t("jobs.refresh") if "jobs" in t("__missing__") else "Yenile")  # güvenli
-        self.btn_refresh.setText(t("jobs.refresh") if t("jobs.refresh") != "[jobs.refresh]" else "Yenile")
+        self.btn_refresh = QPushButton(t("jobs.refresh"))
+        self.btn_refresh.setText(t("jobs.refresh"))
         self.btn_refresh.clicked.connect(self.refresh)
 
         self.cancel_id = QLineEdit()
         self.cancel_id.setPlaceholderText(t("jobs.job_id"))
-        self.btn_cancel = QPushButton(t("jobs.cancel") if t("jobs.cancel") != "[jobs.cancel]" else "İşi İptal Et")
+        self.btn_cancel = QPushButton(t("jobs.cancel"))
         self.btn_cancel.clicked.connect(self.cancel)
 
         row = QHBoxLayout()

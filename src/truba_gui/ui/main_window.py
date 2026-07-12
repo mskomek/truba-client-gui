@@ -1,7 +1,7 @@
 import webbrowser
 
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QMessageBox, QProgressDialog, QSystemTrayIcon,
+    QApplication, QDialog, QMainWindow, QMessageBox, QProgressDialog, QSystemTrayIcon,
     QTabWidget
 )
 from PySide6.QtWidgets import (
@@ -14,6 +14,10 @@ from PySide6.QtSvg import QSvgRenderer
 from truba_gui import __version__
 from truba_gui.core.paths import is_frozen_exe
 from truba_gui.core.i18n import t, set_language
+from truba_gui.config.storage import (
+    get_sbatch_auto_open_outputs_enabled,
+    get_sbatch_follow_mode,
+)
 from truba_gui.services.app_updater import (
     download_and_verify_release,
     get_latest_release,
@@ -95,6 +99,7 @@ class MainWindow(QMainWindow):
         self._update_progress: QProgressDialog | None = None
         self._update_manual = False
         self._update_interactive = False
+        self._editor_windows: list[QMainWindow] = []
         self._job_poll_worker: AsyncCall | None = None
         self._job_poll_generation = 0
         self._init_language_menu()
@@ -113,12 +118,9 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.login, t("tabs.login"))
         self.tabs.addTab(self.jobs_outputs, t("tabs.jobs_outputs"))
         self.tabs.addTab(self.directories, t("tabs.directories"))
-        self.tabs.addTab(
-            self.ftp,
-            t("tabs.ftp") if t("tabs.ftp") != "[tabs.ftp]" else "FTP",
-        )
+        self.tabs.addTab(self.ftp, t("tabs.ftp"))
         self.tabs.addTab(self.editor, t("tabs.editor"))
-        self.tabs.addTab(self.logs, t("tabs.logs") if t("tabs.logs") != "[tabs.logs]" else "Logs")
+        self.tabs.addTab(self.logs, t("tabs.logs"))
         self.tabs.currentChanged.connect(self._sync_command_polling)
         self.jobs_outputs.polling_visibility_changed.connect(
             self._sync_command_polling
@@ -147,8 +149,12 @@ class MainWindow(QMainWindow):
 
         self.jobs_outputs.request_show_directories.connect(self.show_directories)
         self.directories.open_in_editor.connect(self.open_in_editor)
+        self.directories.open_in_editor_window.connect(self.open_in_editor_window)
         self.directories.script_submitted.connect(self.on_script_submitted)
         self.ftp.openFileRequested.connect(self.directories.on_open_file)
+        self.ftp.openFileInNewWindowRequested.connect(
+            self.directories.on_open_file_in_new_window
+        )
         self.ftp.submitRequested.connect(self.directories.submit_script)
         self.editor.script_submitted.connect(self.on_script_submitted)
         QTimer.singleShot(1500, lambda: self._check_for_updates(manual=False))
@@ -313,9 +319,9 @@ class MainWindow(QMainWindow):
                 session=getattr(self, "_session", None),
                 update_remote_defaults=self.login.update_active_profile_remote_defaults,
             )
-            dlg.exec()
-            self.jobs_outputs.apply_refresh_settings()
-            self.ftp.apply_settings()
+            if dlg.exec() == QDialog.DialogCode.Accepted:
+                self.jobs_outputs.apply_refresh_settings()
+                self.ftp.apply_settings()
         except Exception:
             pass
 
@@ -482,10 +488,7 @@ class MainWindow(QMainWindow):
             self.tabs.setTabText(self.tabs.indexOf(self.login), t("tabs.login"))
             self.tabs.setTabText(self.tabs.indexOf(self.jobs_outputs), t("tabs.jobs_outputs"))
             self.tabs.setTabText(self.tabs.indexOf(self.directories), t("tabs.directories"))
-            self.tabs.setTabText(
-                self.tabs.indexOf(self.ftp),
-                t("tabs.ftp") if t("tabs.ftp") != "[tabs.ftp]" else "FTP",
-            )
+            self.tabs.setTabText(self.tabs.indexOf(self.ftp), t("tabs.ftp"))
             self.tabs.setTabText(self.tabs.indexOf(self.editor), t("tabs.editor"))
             self.tabs.setTabText(self.tabs.indexOf(self.logs), t("tabs.logs"))
 
@@ -584,13 +587,34 @@ class MainWindow(QMainWindow):
         if idx >= 0:
             self.tabs.setCurrentIndex(idx)
 
+    def open_in_editor_window(self, path: str, content: str):
+        window = QMainWindow()
+        window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        window.setWindowFlag(Qt.WindowType.Window, True)
+        editor = EditorWidget()
+        editor.set_session(getattr(self, "_session", None))
+        editor.script_submitted.connect(self.on_script_submitted)
+        editor.open_file(path, content)
+        window.setCentralWidget(editor)
+        window.setWindowTitle(f"{t('tabs.editor')} - {path}")
+        window.resize(980, 720)
+        window.destroyed.connect(lambda _obj=None, current=window: self._editor_windows.remove(current) if current in self._editor_windows else None)
+        self._editor_windows.append(window)
+        window.show()
+
     def on_script_submitted(self, job_id: str, script_path: str):
         try:
+            auto_open_outputs = get_sbatch_auto_open_outputs_enabled()
             idx = self.tabs.indexOf(self.jobs_outputs)
-            if idx >= 0:
+            if auto_open_outputs and idx >= 0:
                 self.tabs.setCurrentIndex(idx)
             if hasattr(self.jobs_outputs, "focus_job"):
-                self.jobs_outputs.focus_job(job_id, script_path)
+                self.jobs_outputs.focus_job(
+                    job_id,
+                    script_path,
+                    switch_to_outputs=auto_open_outputs,
+                    follow_mode=get_sbatch_follow_mode(),
+                )
         except Exception:
             pass
 

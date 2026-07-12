@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -22,10 +25,15 @@ from truba_gui.config.storage import (
     get_ftp_transfer_type,
     clear_file_association,
     get_file_associations,
+    get_ftp_state,
     get_lssrv_auto_refresh_enabled,
+    get_sbatch_auto_open_outputs_enabled,
+    get_sbatch_follow_mode,
+    get_transfer_auto_refresh_enabled,
     get_transfer_parallelism,
     load_settings,
     set_file_association,
+    update_ftp_state,
     update_settings,
 )
 from truba_gui.core.i18n import t
@@ -72,11 +80,69 @@ class SettingsDialog(QDialog):
         self.cb_lssrv_auto_refresh.setChecked(get_lssrv_auto_refresh_enabled())
         self.cb_lssrv_auto_refresh.setToolTip(t("settings.lssrv_auto_refresh_tip"))
 
+        self.cb_sbatch_auto_open_outputs = QCheckBox(
+            t("settings.sbatch_auto_open_outputs_label")
+        )
+        self.cb_sbatch_auto_open_outputs.setChecked(
+            get_sbatch_auto_open_outputs_enabled()
+        )
+        self.cb_sbatch_auto_open_outputs.setToolTip(
+            t("settings.sbatch_auto_open_outputs_tip")
+        )
+
+        self.cb_sbatch_follow_mode = QComboBox()
+        self.cb_sbatch_follow_mode.addItem(
+            t("settings.sbatch_follow_mode_tabs"),
+            "new_tabs_split",
+        )
+        self.cb_sbatch_follow_mode.addItem(
+            t("settings.sbatch_follow_mode_window_combined"),
+            "new_window_combined",
+        )
+        self.cb_sbatch_follow_mode.addItem(
+            t("settings.sbatch_follow_mode_windows_split"),
+            "new_windows_split",
+        )
+        self.cb_sbatch_follow_mode.addItem(
+            t("settings.sbatch_follow_mode_outputs_tab"),
+            "outputs_tab",
+        )
+        for mode, tip_key in {
+            "new_tabs_split": "settings.sbatch_follow_mode_tabs_tip",
+            "new_window_combined": "settings.sbatch_follow_mode_window_combined_tip",
+            "new_windows_split": "settings.sbatch_follow_mode_windows_split_tip",
+            "outputs_tab": "settings.sbatch_follow_mode_outputs_tab_tip",
+        }.items():
+            index = self.cb_sbatch_follow_mode.findData(mode)
+            if index >= 0:
+                self.cb_sbatch_follow_mode.setItemData(
+                    index,
+                    t(tip_key),
+                    Qt.ItemDataRole.ToolTipRole,
+                )
+        follow_mode_index = self.cb_sbatch_follow_mode.findData(
+            get_sbatch_follow_mode()
+        )
+        self.cb_sbatch_follow_mode.setCurrentIndex(max(0, follow_mode_index))
+        self.cb_sbatch_follow_mode.setToolTip(
+            t("settings.sbatch_follow_mode_tip")
+        )
+
         self.sp_transfer_parallelism = QSpinBox()
         self.sp_transfer_parallelism.setRange(1, 10)
         self.sp_transfer_parallelism.setSingleStep(1)
         self.sp_transfer_parallelism.setValue(get_transfer_parallelism())
         self.sp_transfer_parallelism.setToolTip(t("settings.transfer_parallelism_tip"))
+
+        self.cb_transfer_auto_refresh = QCheckBox(
+            t("settings.transfer_auto_refresh_label")
+        )
+        self.cb_transfer_auto_refresh.setChecked(
+            get_transfer_auto_refresh_enabled()
+        )
+        self.cb_transfer_auto_refresh.setToolTip(
+            t("settings.transfer_auto_refresh_tip")
+        )
 
         self.cb_ftp_transfer_type = QComboBox()
         self.cb_ftp_transfer_type.addItem(t("ftp.mode_auto"), "auto")
@@ -85,6 +151,23 @@ class SettingsDialog(QDialog):
         transfer_type_index = self.cb_ftp_transfer_type.findData(get_ftp_transfer_type())
         self.cb_ftp_transfer_type.setCurrentIndex(max(0, transfer_type_index))
         self.cb_ftp_transfer_type.setToolTip(t("settings.ftp_transfer_type_tip"))
+        ftp_state = get_ftp_state()
+        self.ftp_local_dir = QLineEdit(str(ftp_state.get("local_dir") or ""))
+        self.ftp_local_dir.setToolTip(t("settings.ftp_local_dir_tip"))
+        self.btn_ftp_local_dir_browse = QPushButton(t("settings.ftp_local_dir_browse"))
+        self.btn_ftp_local_dir_browse.clicked.connect(self._browse_ftp_local_dir)
+        ftp_local_dir_row = QHBoxLayout()
+        ftp_local_dir_row.addWidget(self.ftp_local_dir, 1)
+        ftp_local_dir_row.addWidget(self.btn_ftp_local_dir_browse)
+
+        self.cb_ftp_active_remote = QComboBox()
+        self.cb_ftp_active_remote.addItem(t("ftp.scratch"), "scratch")
+        self.cb_ftp_active_remote.addItem(t("ftp.home"), "home")
+        active_remote_index = self.cb_ftp_active_remote.findData(
+            ftp_state.get("active_remote") or "scratch"
+        )
+        self.cb_ftp_active_remote.setCurrentIndex(max(0, active_remote_index))
+        self.cb_ftp_active_remote.setToolTip(t("settings.ftp_active_remote_tip"))
         self._file_associations = get_file_associations()
 
         connection_group = QGroupBox(t("settings.connection_section"))
@@ -100,6 +183,11 @@ class SettingsDialog(QDialog):
             self.sp_jobs_outputs_refresh_interval,
         )
         jobs_form.addRow(self.cb_lssrv_auto_refresh)
+        jobs_form.addRow(self.cb_sbatch_auto_open_outputs)
+        jobs_form.addRow(
+            t("settings.sbatch_follow_mode_label"),
+            self.cb_sbatch_follow_mode,
+        )
 
         ftp_group = QGroupBox(t("settings.ftp_section"))
         ftp_form = QFormLayout(ftp_group)
@@ -109,6 +197,8 @@ class SettingsDialog(QDialog):
         )
         self.ftp_scratch_dir = QLineEdit(system["scratch_dir"])
         self.ftp_home_dir = QLineEdit(system["home_dir"])
+        self._initial_scratch_dir = self.ftp_scratch_dir.text().strip()
+        self._initial_home_dir = self.ftp_home_dir.text().strip()
         profile_available = bool(
             session
             and session.get("connected")
@@ -119,6 +209,11 @@ class SettingsDialog(QDialog):
         self.ftp_home_dir.setEnabled(profile_available)
         ftp_form.addRow(t("settings.ftp_scratch_default"), self.ftp_scratch_dir)
         ftp_form.addRow(t("settings.ftp_home_default"), self.ftp_home_dir)
+        ftp_form.addRow(t("settings.ftp_local_dir_label"), ftp_local_dir_row)
+        ftp_form.addRow(
+            t("settings.ftp_active_remote_label"),
+            self.cb_ftp_active_remote,
+        )
         ftp_form.addRow(
             t("settings.ftp_transfer_type_label"),
             self.cb_ftp_transfer_type,
@@ -127,6 +222,7 @@ class SettingsDialog(QDialog):
             t("settings.transfer_parallelism_label"),
             self.sp_transfer_parallelism,
         )
+        ftp_form.addRow(self.cb_transfer_auto_refresh)
         self.btn_ftp_reset_defaults = QPushButton(
             t("settings.ftp_reset_defaults")
         )
@@ -179,18 +275,37 @@ class SettingsDialog(QDialog):
                 "close_x11_procs_on_exit": self.cb_close_x11_procs_on_exit.isChecked(),
                 "jobs_outputs_refresh_interval_seconds": int(self.sp_jobs_outputs_refresh_interval.value()),
                 "lssrv_auto_refresh_enabled": self.cb_lssrv_auto_refresh.isChecked(),
+                "sbatch_auto_open_outputs": self.cb_sbatch_auto_open_outputs.isChecked(),
+                "sbatch_follow_mode": str(
+                    self.cb_sbatch_follow_mode.currentData() or "new_tabs_split"
+                ),
                 "transfer_parallelism": int(self.sp_transfer_parallelism.value()),
+                "transfer_auto_refresh_enabled": self.cb_transfer_auto_refresh.isChecked(),
                 "ftp_transfer_type": str(
                     self.cb_ftp_transfer_type.currentData() or "auto"
                 ),
             }
         )
         if self._update_remote_defaults is not None and self.ftp_scratch_dir.isEnabled():
-            self._update_remote_defaults(
-                self.ftp_scratch_dir.text().strip(),
-                self.ftp_home_dir.text().strip(),
-            )
+            scratch = self.ftp_scratch_dir.text().strip()
+            home = self.ftp_home_dir.text().strip()
+            if scratch != self._initial_scratch_dir or home != self._initial_home_dir:
+                self._update_remote_defaults(scratch, home)
+        update_ftp_state(
+            local_dir=self.ftp_local_dir.text().strip(),
+            active_remote=str(self.cb_ftp_active_remote.currentData() or "scratch"),
+        )
         self.accept()
+
+    def _browse_ftp_local_dir(self) -> None:
+        current = self.ftp_local_dir.text().strip() or os.path.expanduser("~")
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            t("settings.ftp_local_dir_select"),
+            current,
+        )
+        if folder:
+            self.ftp_local_dir.setText(folder)
 
     def _reset_ftp_defaults(self) -> None:
         defaults = truba_default_remote_paths()

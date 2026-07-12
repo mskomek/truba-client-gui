@@ -18,6 +18,7 @@ from truba_gui.core.history import append_event
 from truba_gui.core.logging import append_log
 from truba_gui.services.slurm_mock import MockSlurmBackend
 from truba_gui.services.files_mock import MockFilesBackend
+from truba_gui.services.files_ftp import FTPFilesBackend
 from truba_gui.services.x11_runner import X11Runner
 from truba_gui.ssh.client import SSHClientWrapper, SSHConnInfo
 from truba_gui.services.files_ssh import SSHFilesBackend
@@ -34,6 +35,7 @@ from truba_gui.ui.dialogs.connection_dialog import ConnectionDialog
 
 import os
 import shiboken6
+from urllib.parse import urlparse
 
 
 FTP_TEST_MODE_ENV = "TRUBA_GUI_FTP_TEST_MODE"
@@ -46,6 +48,19 @@ def is_ftp_test_mode_enabled() -> bool:
 
 def is_ftp_mock_host(host: str) -> bool:
     return (host or "").strip().lower() in FTP_TEST_HOSTS
+
+
+def is_plain_ftp_target(host: str, port: int) -> bool:
+    value = (host or "").strip().lower()
+    return value.startswith("ftp://") or port == 21
+
+
+def normalize_plain_ftp_host(host: str) -> str:
+    value = (host or "").strip()
+    if value.lower().startswith("ftp://"):
+        parsed = urlparse(value)
+        return parsed.hostname or value[6:].split("/", 1)[0]
+    return value
 
 
 class _TerminalConsole(QPlainTextEdit):
@@ -153,20 +168,20 @@ class LoginWidget(QWidget):
         self.password = QLineEdit()
         self.password.setEchoMode(QLineEdit.EchoMode.Password)
 
-        self.cb_save_password = QCheckBox(t("login.save_password") if t("login.save_password") != "[login.save_password]" else "Şifreyi kaydet")
+        self.cb_save_password = QCheckBox(t("login.save_password"))
         self._profile_system_settings = normalize_system_settings(None)
         self._password_prompt_policy = "when-needed"
         self.key_path = QLineEdit()
-        self.btn_browse_key = QPushButton(t("login.browse") if t("login.browse") != "[login.browse]" else "Seç")
+        self.btn_browse_key = QPushButton(t("login.browse"))
         self.btn_browse_key.clicked.connect(self.pick_key)
 
-        self.cb_x11 = QCheckBox(t("login.x11_enable") if t("login.x11_enable") != "[login.x11_enable]" else "X11 Forwarding")
+        self.cb_x11 = QCheckBox(t("login.x11_enable"))
         self.cb_strict_hostkey = QCheckBox(t("login.strict_host_key"))
 
         # Simulation / dry-run option removed from UI.
         # (If a legacy profile contains a 'dry_run' field, it is ignored.)
 
-        self.btn_save = QPushButton(t("login.save") if t("login.save") != "[login.save]" else "Kaydet")
+        self.btn_save = QPushButton(t("login.save"))
         self.btn_save.clicked.connect(self.save_profile)
 
         self.btn_add_connection = QPushButton(t("login.add_connection"))
@@ -175,7 +190,7 @@ class LoginWidget(QWidget):
         self.btn_connect = QPushButton(t("login.connect_selected"))
         self.btn_connect.clicked.connect(self.connect_selected_profile)
 
-        self.status_label = QLabel(t("login.status_disconnected") if t("login.status_disconnected") != "[login.status_disconnected]" else "Bağlı değil")
+        self.status_label = QLabel(t("login.status_disconnected"))
 
         # ---- Console
         self.console = _TerminalConsole(self)
@@ -201,7 +216,7 @@ class LoginWidget(QWidget):
             "selection-background-color: #264f78; }"
         )
         self.cmd_in.setPlaceholderText(t("login.command_placeholder"))
-        self.btn_run_cmd = QPushButton(t("login.run_command") if t("login.run_command") != "[login.run_command]" else "Çalıştır")
+        self.btn_run_cmd = QPushButton(t("login.run_command"))
         self.btn_run_cmd.clicked.connect(self.cmd_in.submit_current)
         self.cmd_in.command_submitted.connect(self.run_command_text)
         self.cmd_in.reconnect_requested.connect(self._prompt_reconnect)
@@ -579,7 +594,7 @@ class LoginWidget(QWidget):
                 "files": files,
                 "profile_name": self.profile_name.text().strip(),
             }
-            self.status_label.setText(t("login.status_connected") if t("login.status_connected") != "[login.status_connected]" else "Bağlı")
+            self.status_label.setText(t("login.status_connected"))
             self.cmd_in.set_connected(True)
             self.append_console("SSH bağlantısı kuruldu.")
             self._sync_shell_geometry()
@@ -595,7 +610,7 @@ class LoginWidget(QWidget):
             self.btn_connect.setEnabled(bool(self._selected_profile_name()))
 
     def _on_connect_failed(self, message: str, exc: object) -> None:
-        self.status_label.setText(t("login.status_disconnected") if t("login.status_disconnected") != "[login.status_disconnected]" else "Bağlı değil")
+        self.status_label.setText(t("login.status_disconnected"))
         self.cmd_in.set_connected(False)
         self.append_console(t("login.conn_error_prefix").format(err=message))
         if "SSH protocol banner" in message or "banner" in message.lower():
@@ -716,7 +731,7 @@ class LoginWidget(QWidget):
         return ""
 
     def pick_key(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, t("login.ssh_key") if t("login.ssh_key") != "[login.ssh_key]" else "SSH Anahtar Seç")
+        path, _ = QFileDialog.getOpenFileName(self, t("login.ssh_key"))
         if path:
             self.key_path.setText(path)
 
@@ -793,7 +808,7 @@ class LoginWidget(QWidget):
             on_save=self._save_profile_from_dialog,
             on_connect=self._save_and_connect_from_dialog,
         )
-        dlg.setWindowTitle(t("connection.edit_dialog_title") if t("connection.edit_dialog_title") != "[connection.edit_dialog_title]" else "Edit Connection")
+        dlg.setWindowTitle(t("connection.edit_dialog_title"))
         self._editing_profile_original_name = name
         try:
             dlg.exec()
@@ -810,8 +825,8 @@ class LoginWidget(QWidget):
             return
         self.profiles_list.setCurrentItem(item)
         menu = QMenu(self)
-        act_connect = menu.addAction(t("login.connect") if t("login.connect") != "[login.connect]" else "Bağlan")
-        act_edit = menu.addAction(t("connection.edit_action") if t("connection.edit_action") != "[connection.edit_action]" else "Edit")
+        act_connect = menu.addAction(t("login.connect"))
+        act_edit = menu.addAction(t("connection.edit_action"))
         chosen = menu.exec(self.profiles_list.mapToGlobal(pos))
         if chosen == act_connect:
             self.connect_selected_profile()
@@ -981,11 +996,47 @@ class LoginWidget(QWidget):
             "files": files,
             "profile_name": self.profile_name.text().strip(),
         }
-        self.status_label.setText(t("login.status_mock") if t("login.status_mock") != "[login.status_mock]" else "Mock mod")
+        self.status_label.setText(t("login.status_mock"))
         self.cmd_in.set_connected(False)
         self.append_console("Mock bağlantı aktif.")
         append_event({"type": "connect", "host": cfg.host, "user": cfg.username, "dry_run": True})
         self.session_changed.emit(self._session)
+
+    def _finish_plain_ftp_connection(self, cfg: SSHConfig, old_ssh) -> bool:
+        if old_ssh is not None:
+            try:
+                old_ssh.close()
+            except Exception:
+                pass
+        files = FTPFilesBackend(
+            normalize_plain_ftp_host(cfg.host),
+            port=cfg.port,
+            username=cfg.username,
+            password=cfg.password,
+        )
+        self._session = {
+            "connected": True,
+            "cfg": cfg,
+            "ssh": None,
+            "slurm": None,
+            "files": files,
+            "profile_name": self.profile_name.text().strip(),
+        }
+        self.status_label.setText(
+            t("login.status_connected")
+        )
+        self.cmd_in.set_connected(False)
+        self.append_console("FTP bağlantısı kuruldu.")
+        append_event(
+            {
+                "type": "connect",
+                "host": cfg.host,
+                "user": cfg.username,
+                "protocol": "ftp",
+            }
+        )
+        self.session_changed.emit(self._session)
+        return True
 
     def connect_clicked(self) -> bool:
         try:
@@ -1010,9 +1061,11 @@ class LoginWidget(QWidget):
                     if password is None:
                         return False
 
-        use_ftp_mock = is_ftp_test_mode_enabled() and is_ftp_mock_host(self.host.text())
+        host_text = self.host.text().strip()
+        use_ftp_mock = is_ftp_test_mode_enabled() and is_ftp_mock_host(host_text)
+        use_plain_ftp = (not use_ftp_mock) and is_plain_ftp_target(host_text, port)
         cfg = SSHConfig(
-            host=self.host.text().strip(),
+            host=host_text,
             port=port,
             username=self.username.text().strip(),
             password=password,
@@ -1043,17 +1096,25 @@ class LoginWidget(QWidget):
         try:
             if cfg.dry_run:
                 self._finish_mock_connection(cfg, old_ssh)
+            elif use_plain_ftp:
+                return self._finish_plain_ftp_connection(cfg, old_ssh)
             else:
                 return self._begin_connect_async(cfg, old_ssh)
         except Exception as e:
-            self.status_label.setText(t("login.status_disconnected") if t("login.status_disconnected") != "[login.status_disconnected]" else "Bağlı değil")
+            self.status_label.setText(t("login.status_disconnected"))
             self.append_console(t("login.conn_error_prefix").format(err=e))
             msg = str(e)
             if "SSH protocol banner" in msg or "banner" in msg.lower():
                 self.append_console(
                     "İpucu: SSH sunucusu banner döndürmeden önce gecikiyor olabilir; VPN/ağ, port ve uzak sshd erişimini kontrol edin."
                 )
-            show_exception(self, title=t("login.conn_error_title"), user_message=str(e), exc=e, area="SSH")
+            show_exception(
+                self,
+                title=t("login.conn_error_title"),
+                user_message=str(e),
+                exc=e,
+                area="FTP" if use_plain_ftp else "SSH",
+            )
             return False
         return True
 
@@ -1106,7 +1167,7 @@ class LoginWidget(QWidget):
         if not self._session.get("connected", False):
             return
         self._session["connected"] = False
-        self.status_label.setText(t("login.status_disconnected") if t("login.status_disconnected") != "[login.status_disconnected]" else "Bağlı değil")
+        self.status_label.setText(t("login.status_disconnected"))
         self.cmd_in.set_connected(False)
         notice = t("login.reconnect_notice").format(reason=reason or "")
         if notice != "[login.reconnect_notice]":

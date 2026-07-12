@@ -51,6 +51,14 @@ class RemoteDirPanelSortingTests(unittest.TestCase):
     def _names(view) -> list[str]:
         return [view.topLevelItem(i).text(0) for i in range(view.topLevelItemCount())]
 
+    @staticmethod
+    def _entry_names(view) -> list[str]:
+        return [
+            view.topLevelItem(i).text(0)
+            for i in range(view.topLevelItemCount())
+            if view.topLevelItem(i).text(0) != ".."
+        ]
+
     def _click(self, view, column: int) -> None:
         view.header().sectionClicked.emit(column)
         QApplication.processEvents()
@@ -152,6 +160,41 @@ class RemoteDirPanelSortingTests(unittest.TestCase):
             names = self._names(view)
             if key in ("all", "folders"):
                 self.assertEqual(names[0], "..", key)
+
+    def test_search_filters_displayed_entries_by_name_size_type_and_date(self) -> None:
+        all_view = self.panel.views["all"]
+
+        self.panel.search_in.setText("file2")
+        QApplication.processEvents()
+        self.assertEqual(self._entry_names(all_view), ["File2.txt"])
+
+        self.panel.search_in.setText("2048")
+        QApplication.processEvents()
+        self.assertEqual(self._entry_names(all_view), ["File2.txt"])
+
+        self.panel.search_in.setText("2.0 KB")
+        QApplication.processEvents()
+        self.assertEqual(self._entry_names(all_view), ["File2.txt"])
+
+        self.panel.search_in.setText(".zip")
+        QApplication.processEvents()
+        self.assertEqual(self._entry_names(all_view), ["archive10.zip"])
+
+        self.panel.search_in.setText("01-01-70")
+        QApplication.processEvents()
+        self.assertTrue(self._entry_names(all_view))
+
+    def test_search_applies_to_category_tabs_and_clear_restores_entries(self) -> None:
+        self.panel.search_in.setText("image2")
+        QApplication.processEvents()
+        self.assertEqual(self._entry_names(self.panel.views["all"]), ["image2.iso"])
+        self.assertEqual(self._entry_names(self.panel.views["iso"]), ["image2.iso"])
+        self.assertEqual(self._entry_names(self.panel.views["archives"]), [])
+
+        self.panel.btn_search_clear.click()
+        QApplication.processEvents()
+        self.assertIn("image10.iso", self._entry_names(self.panel.views["iso"]))
+        self.assertIn("archive2.7z", self._entry_names(self.panel.views["archives"]))
 
 
 if __name__ == "__main__":

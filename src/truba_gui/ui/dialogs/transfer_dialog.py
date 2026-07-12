@@ -23,21 +23,22 @@ from PySide6.QtWidgets import (
 from truba_gui.core.i18n import t
 
 
-def _tr(key: str, fallback: str) -> str:
-    value = t(key)
-    return fallback if value == f"[{key}]" else value
-
-
 @dataclass
 class TransferItem:
     op: str
     src: str
     dst: str
     recursive: bool = False
+    size: int | None = None
 
     def label(self) -> str:
         name = (self.dst or self.src).rstrip("/").split("/")[-1] or (self.dst or self.src)
-        return f"{self.op}: {name}"
+        op_label = {
+            "upload": t("transfer.op_upload"),
+            "download": t("transfer.op_download"),
+            "download_tree": t("transfer.op_download"),
+        }.get(self.op, self.op)
+        return f"{op_label}: {name}"
 
 
 class _TransferWorker(QObject):
@@ -59,7 +60,7 @@ class _TransferWorker(QObject):
         total = len(self._items)
         for idx, item in enumerate(self._items, start=1):
             if self._cancel:
-                self.finished.emit(item, True, t("dirs.cancelled") if t("dirs.cancelled") != "[dirs.cancelled]" else "Cancelled.")
+                self.finished.emit(item, True, t("dirs.cancelled"))
                 return
             self.progress.emit(idx, item)
             try:
@@ -83,6 +84,7 @@ class TransferDialog(QDialog):
         items: List[TransferItem],
         run_item: Callable[[TransferItem], None],
         parallel_limit: int = 1,
+        max_parallel_limit: int = 10,
     ) -> None:
         super().__init__(parent)
         self.setModal(False)
@@ -94,7 +96,11 @@ class TransferDialog(QDialog):
             )
         except (TypeError, ValueError):
             self._run_item_accepts_progress = False
-        self._parallel_limit = max(1, min(10, int(parallel_limit or 1)))
+        self._max_parallel_limit = max(1, min(10, int(max_parallel_limit or 10)))
+        self._parallel_limit = max(
+            1,
+            min(self._max_parallel_limit, int(parallel_limit or 1)),
+        )
         self._items: List[TransferItem] = list(items)
         self._pending: List[TransferItem] = list(items)
         self._completed: List[TransferItem] = []
@@ -108,7 +114,7 @@ class TransferDialog(QDialog):
         self._active_items: List[TransferItem] = []
 
         self.lbl_status = QLabel(self._status_text())
-        self.lbl_transfer_stats = QLabel(_tr("transfer.no_active_transfer", "No active transfer."))
+        self.lbl_transfer_stats = QLabel(t("transfer.no_active_transfer"))
 
         self.tabs = QTabWidget()
         self.queue_list = QListWidget()
@@ -126,7 +132,7 @@ class TransferDialog(QDialog):
 
         self.btn_stop = QPushButton(t("transfer.stop"))
         self.btn_cancel = QPushButton(t("transfer.cancel"))
-        self.btn_clear_pending = QPushButton(_tr("transfer.clear_pending", "Clear queued"))
+        self.btn_clear_pending = QPushButton(t("transfer.clear_pending"))
         self.btn_retry = QPushButton(t("transfer.retry_failed"))
         self.btn_close = QPushButton(t("common.close"))
         self.btn_stop.clicked.connect(self.stop_after_current)
@@ -146,7 +152,10 @@ class TransferDialog(QDialog):
         root = QVBoxLayout(self)
         root.addWidget(self.lbl_status)
         root.addWidget(self.lbl_transfer_stats)
-        root.addWidget(QLabel(t("transfer.parallel_hint").format(limit=self._parallel_limit)))
+        self.lbl_parallel_hint = QLabel(
+            t("transfer.parallel_hint").format(limit=self._parallel_limit)
+        )
+        root.addWidget(self.lbl_parallel_hint)
         root.addWidget(self.tabs)
         root.addLayout(btn_row)
 
@@ -165,7 +174,9 @@ class TransferDialog(QDialog):
         self.lbl_status.setText(self._status_text())
         self.queue_list.clear()
         for item in self._pending:
-            self.queue_list.addItem(item.label())
+            lw = QListWidgetItem(item.label())
+            lw.setData(Qt.ItemDataRole.UserRole, item)
+            self.queue_list.addItem(lw)
         self.errors_list.clear()
         for item, err in self._errors:
             lw = QListWidgetItem(f"{item.label()} — {err}")
@@ -199,6 +210,17 @@ class TransferDialog(QDialog):
         self._thread.start()
         self._running = True
 
+    def set_parallel_limit(self, parallel_limit: int) -> None:
+        self._parallel_limit = max(
+            1,
+            min(self._max_parallel_limit, int(parallel_limit or 1)),
+        )
+        self.lbl_parallel_hint.setText(
+            t("transfer.parallel_hint").format(limit=self._parallel_limit)
+        )
+        if self._thread is not None:
+            self._thread.set_parallel_limit(self._parallel_limit)
+
     def _execute_item(self, item: TransferItem, progress_cb=None) -> None:
         if self._run_item_accepts_progress:
             self._run_item(item, progress_cb)
@@ -211,7 +233,7 @@ class TransferDialog(QDialog):
         if item not in self._active_items:
             self._active_items.append(item)
         self._active_item = self._active_items[0] if self._active_items else item
-        text = _tr("transfer.active_item", "Running: {item}").format(item=item.label())
+        text = t("transfer.active_item").format(item=item.label())
         self.lbl_transfer_stats.setText(text)
         self.transferStatsChanged.emit(text)
         try:
@@ -248,10 +270,7 @@ class TransferDialog(QDialog):
         speed = max(0.0, float(done) / elapsed)
         remaining = max(0, int(total) - int(done)) if total else 0
         eta = remaining / speed if speed > 0 and total else 0
-        text = _tr(
-            "transfer.progress_detail",
-            "{item} — {done}/{total}, {speed}, remaining {eta}",
-        ).format(
+        text = t("transfer.progress_detail").format(
             item=item.label(),
             done=_format_size(done),
             total=_format_size(total) if total else "?",
@@ -267,12 +286,12 @@ class TransferDialog(QDialog):
         self._running = False
         self._refresh()
         if self._stopped and self._pending:
-            text = _tr("transfer.stopped_after_current", "Stopped after the current transfer.")
+            text = t("transfer.stopped_after_current")
             self.lbl_transfer_stats.setText(text)
             self.transferStatsChanged.emit(text)
             return
         if self._cancelled:
-            text = _tr("transfer.cancelled", "Transfer cancelled.")
+            text = t("transfer.cancelled")
             self.lbl_transfer_stats.setText(text)
             self.transferStatsChanged.emit(text)
             return
@@ -331,6 +350,15 @@ class TransferDialog(QDialog):
         self._pending.clear()
         self._refresh()
 
+    def remove_pending_items(self, items: List[TransferItem]) -> None:
+        remove_ids = {id(item) for item in items}
+        if not remove_ids:
+            return
+        self._pending = [item for item in self._pending if id(item) not in remove_ids]
+        if self._thread is not None:
+            self._thread.remove_pending_items(remove_ids)
+        self._refresh()
+
     def finished_cleanly(self) -> bool:
         return self._finished_cleanly and not self._errors
 
@@ -359,6 +387,7 @@ class _WorkerThread(QObject):
         self._cancel = False
         self._stop_after_current = False
         self._clear_pending = False
+        self._removed_item_ids: set[int] = set()
         self._lock = Lock()
 
     def start(self) -> None:
@@ -384,14 +413,29 @@ class _WorkerThread(QObject):
             self._clear_pending = True
             self._stop_after_current = True
 
-    def _state(self) -> tuple[bool, bool, bool]:
+    def remove_pending_items(self, item_ids: set[int]) -> None:
         with self._lock:
-            return self._cancel, self._stop_after_current, self._clear_pending
+            self._removed_item_ids.update(item_ids)
+
+    @Slot(int)
+    def set_parallel_limit(self, parallel_limit: int) -> None:
+        with self._lock:
+            self._parallel_limit = max(1, min(10, int(parallel_limit or 1)))
+
+    def _state(self) -> tuple[bool, bool, bool, int, set[int]]:
+        with self._lock:
+            return (
+                self._cancel,
+                self._stop_after_current,
+                self._clear_pending,
+                self._parallel_limit,
+                set(self._removed_item_ids),
+            )
 
     def _run_one(self, item: TransferItem) -> tuple[TransferItem, bool, str]:
         try:
             def progress(done: int, total: int, current=item) -> None:
-                cancel, _stop, _clear = self._state()
+                cancel, _stop, _clear, _limit, _removed = self._state()
                 if cancel:
                     raise _TransferCancelled()
                 self.transfer_progress.emit(current, int(done), int(total))
@@ -402,9 +446,7 @@ class _WorkerThread(QObject):
             return (
                 item,
                 True,
-                t("dirs.cancelled")
-                if t("dirs.cancelled") != "[dirs.cancelled]"
-                else "Cancelled.",
+                t("dirs.cancelled"),
             )
         except Exception as exc:
             return item, False, str(exc)
@@ -412,27 +454,31 @@ class _WorkerThread(QObject):
     def _run(self) -> None:
         next_index = 0
         futures = {}
-        with ThreadPoolExecutor(max_workers=self._parallel_limit) as executor:
+        with ThreadPoolExecutor(max_workers=10) as executor:
             while next_index < len(self._items) or futures:
-                cancel, stop_after_current, clear_pending = self._state()
+                cancel, stop_after_current, clear_pending, parallel_limit, removed_item_ids = self._state()
                 if cancel:
                     break
                 while (
                     next_index < len(self._items)
-                    and len(futures) < self._parallel_limit
+                    and len(futures) < parallel_limit
                     and not stop_after_current
                     and not clear_pending
                 ):
                     item = self._items[next_index]
                     next_index += 1
+                    if id(item) in removed_item_ids:
+                        continue
                     self.item_started.emit(next_index, item)
                     futures[executor.submit(self._run_one, item)] = item
-                    cancel, stop_after_current, clear_pending = self._state()
+                    cancel, stop_after_current, clear_pending, parallel_limit, removed_item_ids = self._state()
                     if cancel:
                         break
                 if not futures:
                     break
-                done, _pending = wait(futures, return_when=FIRST_COMPLETED)
+                done, _pending = wait(futures, timeout=0.1, return_when=FIRST_COMPLETED)
+                if not done:
+                    continue
                 should_stop = False
                 for future in done:
                     futures.pop(future, None)

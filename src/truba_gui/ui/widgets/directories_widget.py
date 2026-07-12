@@ -41,6 +41,7 @@ class _SubmitWorker(QRunnable):
 
 class DirectoriesWidget(QWidget):
     open_in_editor = Signal(str, str)  # path, content
+    open_in_editor_window = Signal(str, str)  # path, content
     script_submitted = Signal(str, str)  # job_id, script_path
 
     def __init__(self):
@@ -54,6 +55,8 @@ class DirectoriesWidget(QWidget):
 
         self.panel_scratch.open_file.connect(self.on_open_file)
         self.panel_home.open_file.connect(self.on_open_file)
+        self.panel_scratch.open_file_in_new_window.connect(self.on_open_file_in_new_window)
+        self.panel_home.open_file_in_new_window.connect(self.on_open_file_in_new_window)
         self.panel_scratch.submit_requested.connect(self.submit_script)
         self.panel_home.submit_requested.connect(self.submit_script)
 
@@ -63,9 +66,7 @@ class DirectoriesWidget(QWidget):
         self.splitter.setStretchFactor(0, 1)
         self.splitter.setStretchFactor(1, 1)
 
-        self.btn_new_slurm = QPushButton(
-            t("dirs.new_slurm_edit") if t("dirs.new_slurm_edit") != "[dirs.new_slurm_edit]" else "Create/Edit ARF Slurm"
-        )
+        self.btn_new_slurm = QPushButton(t("dirs.new_slurm_edit"))
         self.btn_new_slurm.clicked.connect(self.create_slurm_from_template)
 
         top = QHBoxLayout()
@@ -136,9 +137,7 @@ class DirectoriesWidget(QWidget):
         self.panel_home.set_dir(home_dir)
 
     def retranslate_ui(self):
-        self.btn_new_slurm.setText(
-            t("dirs.new_slurm_edit") if t("dirs.new_slurm_edit") != "[dirs.new_slurm_edit]" else "Create/Edit ARF Slurm"
-        )
+        self.btn_new_slurm.setText(t("dirs.new_slurm_edit"))
         self.panel_scratch.retranslate_ui()
         self.panel_home.retranslate_ui()
 
@@ -177,8 +176,6 @@ class DirectoriesWidget(QWidget):
                 }
             )
             message = t("dirs.submit_failed_no_job_id")
-            if message == "[dirs.submit_failed_no_job_id]":
-                message = "Submission returned no valid job ID. Check the script and Slurm response."
             if output:
                 message += f"\n\n{output}"
             QMessageBox.critical(self, t("common.error"), message)
@@ -195,8 +192,6 @@ class DirectoriesWidget(QWidget):
         )
         self.script_submitted.emit(job_id, script_path)
         message = t("dirs.submit_success")
-        if message == "[dirs.submit_success]":
-            message = "Submitted with sbatch. Job ID: {jobid}"
         QMessageBox.information(
             self,
             t("common.info"),
@@ -215,8 +210,6 @@ class DirectoriesWidget(QWidget):
             }
         )
         message = t("dirs.submit_failed")
-        if message == "[dirs.submit_failed]":
-            message = "sbatch submission failed: {err}\nCheck the connection and Slurm script directives."
         QMessageBox.critical(self, t("common.error"), message.format(err=error))
 
     @staticmethod
@@ -239,7 +232,7 @@ class DirectoriesWidget(QWidget):
             template_path = self._resolve_template_path(template_key)
             template_text = template_path.read_text(encoding="utf-8")
         except Exception as e:
-            show_exception(self, title=t("common.error"), user_message=f"template.slurm okunamadi: {e}", exc=e, area="FILES")
+            show_exception(self, title=t("common.error"), user_message=t("dirs.template_read_failed").format(err=e), exc=e, area="FILES")
             return
 
         default_dir = self.panel_scratch.current_dir or ""
@@ -253,8 +246,8 @@ class DirectoriesWidget(QWidget):
 
         name, ok = QInputDialog.getText(
             self,
-            t("dirs.new_slurm_name_title") if t("dirs.new_slurm_name_title") != "[dirs.new_slurm_name_title]" else "New Slurm Script",
-            t("dirs.new_slurm_name_label") if t("dirs.new_slurm_name_label") != "[dirs.new_slurm_name_label]" else "File name:",
+            t("dirs.new_slurm_name_title"),
+            t("dirs.new_slurm_name_label"),
             text="new_job.slurm",
         )
         if not ok:
@@ -277,7 +270,7 @@ class DirectoriesWidget(QWidget):
                 ans = QMessageBox.question(
                     self,
                     t("dirs.conflict_title"),
-                    (t("dirs.new_slurm_exists") if t("dirs.new_slurm_exists") != "[dirs.new_slurm_exists]" else "File already exists. Overwrite in editor?"),
+                    t("dirs.new_slurm_exists"),
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                     QMessageBox.StandardButton.No,
                 )
@@ -289,15 +282,15 @@ class DirectoriesWidget(QWidget):
 
     def _pick_template_key(self) -> str:
         options = [
-            t("dirs.template_core") if t("dirs.template_core") != "[dirs.template_core]" else "Core template",
-            t("dirs.template_cpu") if t("dirs.template_cpu") != "[dirs.template_cpu]" else "CPU template",
-            t("dirs.template_gpu") if t("dirs.template_gpu") != "[dirs.template_gpu]" else "GPU template",
-            t("dirs.template_mpi") if t("dirs.template_mpi") != "[dirs.template_mpi]" else "MPI template",
+            t("dirs.template_core"),
+            t("dirs.template_cpu"),
+            t("dirs.template_gpu"),
+            t("dirs.template_mpi"),
         ]
         choice, ok = QInputDialog.getItem(
             self,
-            t("dirs.template_select_title") if t("dirs.template_select_title") != "[dirs.template_select_title]" else "Slurm template",
-            t("dirs.template_select_label") if t("dirs.template_select_label") != "[dirs.template_select_label]" else "Template type:",
+            t("dirs.template_select_title"),
+            t("dirs.template_select_label"),
             options,
             0,
             False,
@@ -356,10 +349,10 @@ class DirectoriesWidget(QWidget):
             return
 
         dlg = QDialog(self)
-        dlg.setWindowTitle(t("dirs.file_actions") if t("dirs.file_actions") != "[dirs.file_actions]" else "Dosya İşlemleri")
+        dlg.setWindowTitle(t("dirs.file_actions"))
 
-        btn_download = QPushButton(t("dirs.download") if t("dirs.download") != "[dirs.download]" else "İndir")
-        btn_edit = QPushButton(t("dirs.edit") if t("dirs.edit") != "[dirs.edit]" else "Düzelt")
+        btn_download = QPushButton(t("dirs.download"))
+        btn_edit = QPushButton(t("dirs.edit"))
         btn_close = QPushButton(t("common.cancel"))
 
         row = QHBoxLayout(dlg)
@@ -378,14 +371,14 @@ class DirectoriesWidget(QWidget):
             except Exception as e:
                 show_exception(self, title=t("common.error"), user_message=t("dirs.unreadable").format(err=e), exc=e, area="FILES")
                 return
-            save_path, _ = QFileDialog.getSaveFileName(self, t("dirs.save_as") if t("dirs.save_as") != "[dirs.save_as]" else "Farklı Kaydet")
+            save_path, _ = QFileDialog.getSaveFileName(self, t("dirs.save_as"))
             if not save_path:
                 return
             try:
                 with open(save_path, "w", encoding="utf-8") as f:
                     f.write(content)
             except Exception as e:
-                show_exception(self, title=t("common.error"), user_message=f"Kaydedilemedi: {e}", exc=e, area="FILES")
+                show_exception(self, title=t("common.error"), user_message=t("dirs.save_failed").format(err=e), exc=e, area="FILES")
                 return
             append_event({"type": "download", "remote": path, "local": save_path})
             dlg.accept()
@@ -397,7 +390,7 @@ class DirectoriesWidget(QWidget):
             try:
                 content = self.session["files"].read_text(path)
             except Exception as e:
-                show_exception(self, title=t("common.error"), user_message=f"Okunamadı: {e}", exc=e, area="FILES")
+                show_exception(self, title=t("common.error"), user_message=t("dirs.unreadable").format(err=e), exc=e, area="FILES")
                 return
             append_event({"type": "open_editor", "path": path})
             self.open_in_editor.emit(path, content)
@@ -408,3 +401,23 @@ class DirectoriesWidget(QWidget):
         btn_close.clicked.connect(dlg.reject)
 
         dlg.exec()
+
+    def on_open_file_in_new_window(self, path: str) -> None:
+        if path.endswith("/"):
+            return
+        if not self.session or not self.session.get("files"):
+            QMessageBox.warning(self, t("common.error"), t("common.no_connection"))
+            return
+        try:
+            content = self.session["files"].read_text(path)
+        except Exception as e:
+            show_exception(
+                self,
+                title=t("common.error"),
+                user_message=t("dirs.unreadable").format(err=e),
+                exc=e,
+                area="FILES",
+            )
+            return
+        append_event({"type": "open_editor_window", "path": path})
+        self.open_in_editor_window.emit(path, content)

@@ -20,22 +20,6 @@ from PySide6.QtWidgets import (
 from truba_gui.core.i18n import t
 
 
-def _tr(key: str, fallback: str) -> str:
-    value = t(key)
-    return fallback if value == f"[{key}]" else value
-
-
-_ACTION_FALLBACKS = {
-    "overwrite": "Overwrite",
-    "overwrite_if_newer": "Overwrite if source newer",
-    "overwrite_if_size_differs": "Overwrite if different size",
-    "overwrite_if_size_differs_or_newer": "Overwrite if different size or source newer",
-    "resume": "Resume",
-    "rename": "Rename",
-    "skip": "Skip",
-}
-
-
 @dataclass(frozen=True)
 class TransferConflictInfo:
     path: str
@@ -70,9 +54,7 @@ class TransferConflictDialog(QDialog):
         target: TransferConflictInfo,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle(
-            _tr("transfer.conflict_title", "Target file already exists")
-        )
+        self.setWindowTitle(t("transfer.conflict_title"))
         self._source = source
         self._target = target
         self._accepted = False
@@ -81,31 +63,26 @@ class TransferConflictDialog(QDialog):
         root.setSpacing(8)
         root.addWidget(
             QLabel(
-                _tr(
-                    "transfer.conflict_intro",
-                    "The target file already exists.\nPlease choose an action.",
-                )
+                t("transfer.conflict_intro")
             )
         )
 
         body = QHBoxLayout()
         file_col = QVBoxLayout()
         file_col.setSpacing(6)
-        file_col.addWidget(self._file_block(_tr("transfer.source_file", "Source file:"), source))
+        file_col.addWidget(self._file_block(t("transfer.source_file"), source))
         file_col.addSpacing(8)
-        file_col.addWidget(self._file_block(_tr("transfer.target_file", "Target file:"), target))
+        file_col.addWidget(self._file_block(t("transfer.target_file"), target))
         file_col.addStretch(1)
         body.addLayout(file_col, 1)
 
         right_col = QVBoxLayout()
-        action_box = QGroupBox(_tr("transfer.conflict_action", "Action:"))
+        action_box = QGroupBox(t("transfer.conflict_action"))
         action_layout = QVBoxLayout(action_box)
         action_layout.setSpacing(4)
         self.action_buttons: dict[str, QRadioButton] = {}
         for action in self.ACTIONS:
-            button = QRadioButton(
-                _tr(f"transfer.conflict_{action}", _ACTION_FALLBACKS[action])
-            )
+            button = QRadioButton(t(f"transfer.conflict_{action}"))
             self.action_buttons[action] = button
             action_layout.addWidget(button)
         self.action_buttons["overwrite"].setChecked(True)
@@ -115,13 +92,13 @@ class TransferConflictDialog(QDialog):
         options.setSpacing(4)
         options.setContentsMargins(0, 4, 0, 0)
         self.cb_always = QCheckBox(
-            _tr("transfer.conflict_always_use", "Always use this action")
+            t("transfer.conflict_always_use")
         )
         self.cb_queue_only = QCheckBox(
-            _tr("transfer.conflict_current_queue_only", "Apply to current queue only")
+            t("transfer.conflict_current_queue_only")
         )
         self.cb_downloads_only = QCheckBox(
-            _tr("transfer.conflict_downloads_only", "Apply only to downloads")
+            t("transfer.conflict_downloads_only")
         )
         options.addWidget(self.cb_always)
         options.addWidget(self.cb_queue_only)
@@ -188,7 +165,7 @@ class TransferConflictDialog(QDialog):
 
     @classmethod
     def _format_info(cls, info: TransferConflictInfo) -> str:
-        return _tr("transfer.conflict_file_info", "{size}\n{mtime}").format(
+        return t("transfer.conflict_file_info").format(
             size=cls._format_size(info.size),
             mtime=cls._format_time(info.mtime),
         )

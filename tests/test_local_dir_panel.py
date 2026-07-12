@@ -4,12 +4,13 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeyEvent
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from truba_gui.services.local_files import list_local_entries, safe_initial_local_directory
 from truba_gui.ui.widgets.local_dir_panel import LocalDirPanel
@@ -44,6 +45,24 @@ class LocalDirPanelTests(unittest.TestCase):
         self.panel.go_parent()
         self.assertEqual(self.panel.current_dir, str(self.root))
 
+    def test_directory_tabs_are_closable_except_last_tab(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            child = root / "child"
+            child.mkdir()
+
+            self.assertTrue(self.panel.set_dir(str(root)))
+            self.assertTrue(self.panel.open_directory_in_new_tab(str(child)))
+            self.assertTrue(self.panel.tabs.tabsClosable())
+            self.assertEqual(self.panel.tabs.count(), 2)
+
+            self.panel._close_tab(self.panel.tabs.currentIndex())
+            self.assertEqual(self.panel.tabs.count(), 1)
+            self.assertEqual(Path(self.panel.current_dir), root)
+
+            self.panel._close_tab(0)
+            self.assertEqual(self.panel.tabs.count(), 1)
+
     def test_invalid_saved_path_falls_back_safely(self) -> None:
         fallback = safe_initial_local_directory(str(self.root / "__missing_wave030__"))
         self.assertTrue(os.path.isdir(fallback))
@@ -71,6 +90,11 @@ class LocalDirPanelTests(unittest.TestCase):
                 item.setSelected(True)
                 return
         self.fail(f"local item not found: {name}")
+
+    def _current_name(self) -> str:
+        item = self.panel.tree.currentItem()
+        self.assertIsNotNone(item)
+        return item.text(0)
 
     def test_header_sorting_uses_name_size_type_and_modified_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -146,11 +170,53 @@ class LocalDirPanelTests(unittest.TestCase):
             self.assertTrue(self.panel.set_dir(str(source_dir)))
             self._select_name("move.txt")
             self._press(Qt.Key.Key_X, Qt.KeyboardModifier.ControlModifier)
+            self.assertTrue(self.panel.open_directory_in_new_tab(str(target_dir)))
 
-            self.assertTrue(self.panel.set_dir(str(target_dir)))
             self._press(Qt.Key.Key_V, Qt.KeyboardModifier.ControlModifier)
             self.assertEqual((target_dir / "move.txt").read_text(encoding="utf-8"), "move")
             self.assertFalse((source_dir / "move.txt").exists())
+            self.panel.tabs.setCurrentIndex(0)
+            QApplication.processEvents()
+            self.assertNotIn("move.txt", self._names(self.panel))
+
+    def test_delete_and_ctrl_delete_remove_selected_local_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "delete.txt").write_text("delete", encoding="utf-8")
+            (root / "ctrl-delete.txt").write_text("ctrl", encoding="utf-8")
+
+            self.assertTrue(self.panel.set_dir(str(root)))
+            with patch(
+                "truba_gui.ui.widgets.local_dir_panel.QMessageBox.question",
+                return_value=QMessageBox.StandardButton.Yes,
+            ):
+                self._select_name("delete.txt")
+                self._press(Qt.Key.Key_Delete)
+                self.assertFalse((root / "delete.txt").exists())
+
+                self._select_name("ctrl-delete.txt")
+                self._press(Qt.Key.Key_Delete, Qt.KeyboardModifier.ControlModifier)
+                self.assertFalse((root / "ctrl-delete.txt").exists())
+
+    def test_local_page_home_end_shortcuts_move_selection(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for index in range(20):
+                (root / f"item-{index:02d}.txt").write_text(str(index), encoding="utf-8")
+
+            self.assertTrue(self.panel.set_dir(str(root)))
+            self._press(Qt.Key.Key_Home)
+            self.assertEqual(self._current_name(), "..")
+
+            self._press(Qt.Key.Key_End)
+            self.assertEqual(self._current_name(), self._names(self.panel)[-1])
+
+            self._press(Qt.Key.Key_PageUp)
+            after_page_up = self._current_name()
+            self.assertNotEqual(after_page_up, self._names(self.panel)[-1])
+
+            self._press(Qt.Key.Key_PageDown)
+            self.assertNotEqual(self._current_name(), after_page_up)
 
     def test_local_ctrl_v_emits_remote_clipboard_paste_request(self) -> None:
         from truba_gui.services.file_clipboard import get_file_clipboard
@@ -166,6 +232,19 @@ class LocalDirPanelTests(unittest.TestCase):
             self.assertEqual(emitted, [(["/remote/out.txt"], self.panel.current_dir)])
         finally:
             clipboard.clear()
+
+    def test_local_f5_refreshes_focused_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "first.txt").write_text("first", encoding="utf-8")
+
+            self.assertTrue(self.panel.set_dir(str(root)))
+            self.assertNotIn("second.txt", self._names(self.panel))
+
+            (root / "second.txt").write_text("second", encoding="utf-8")
+            self._press(Qt.Key.Key_F5)
+
+            self.assertIn("second.txt", self._names(self.panel))
 
 
 if __name__ == "__main__":

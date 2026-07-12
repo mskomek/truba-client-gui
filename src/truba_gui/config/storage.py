@@ -86,6 +86,46 @@ def set_jobs_outputs_refresh_interval_seconds(seconds: int) -> int:
     return value
 
 
+def get_sbatch_auto_open_outputs_enabled(default: bool = True) -> bool:
+    """Return whether sbatch submissions should switch to Jobs & Outputs."""
+    value = load_settings().get("sbatch_auto_open_outputs", default)
+    return value if isinstance(value, bool) else default
+
+
+def set_sbatch_auto_open_outputs_enabled(enabled: bool) -> bool:
+    """Persist whether sbatch submissions should switch to Jobs & Outputs."""
+    value = bool(enabled)
+    update_settings({"sbatch_auto_open_outputs": value})
+    return value
+
+
+SBATCH_FOLLOW_MODE_OUTPUTS_TAB = "outputs_tab"
+SBATCH_FOLLOW_MODE_NEW_WINDOW_COMBINED = "new_window_combined"
+SBATCH_FOLLOW_MODE_NEW_WINDOWS_SPLIT = "new_windows_split"
+SBATCH_FOLLOW_MODE_NEW_TABS_SPLIT = "new_tabs_split"
+SBATCH_FOLLOW_MODES = {
+    SBATCH_FOLLOW_MODE_OUTPUTS_TAB,
+    SBATCH_FOLLOW_MODE_NEW_WINDOW_COMBINED,
+    SBATCH_FOLLOW_MODE_NEW_WINDOWS_SPLIT,
+    SBATCH_FOLLOW_MODE_NEW_TABS_SPLIT,
+}
+
+
+def get_sbatch_follow_mode(default: str = SBATCH_FOLLOW_MODE_NEW_TABS_SPLIT) -> str:
+    """Return where parsed sbatch output/error files should be followed."""
+    value = str(load_settings().get("sbatch_follow_mode", default)).strip()
+    return value if value in SBATCH_FOLLOW_MODES else default
+
+
+def set_sbatch_follow_mode(mode: str) -> str:
+    """Persist where parsed sbatch output/error files should be followed."""
+    value = str(mode or "").strip()
+    if value not in SBATCH_FOLLOW_MODES:
+        value = SBATCH_FOLLOW_MODE_NEW_TABS_SPLIT
+    update_settings({"sbatch_follow_mode": value})
+    return value
+
+
 def get_lssrv_auto_refresh_enabled(default: bool = False) -> bool:
     """Return whether lssrv should refresh with the Jobs polling timer."""
     value = load_settings().get("lssrv_auto_refresh_enabled", default)
@@ -109,6 +149,19 @@ def set_transfer_parallelism(count: int) -> int:
     """Persist the transfer queue parallelism, capped at 10."""
     value = _coerce_int_in_range(count, 1, 1, 10)
     update_settings({"transfer_parallelism": value})
+    return value
+
+
+def get_transfer_auto_refresh_enabled(default: bool = True) -> bool:
+    """Return whether transfer/mutation completion should refresh affected panes."""
+    value = load_settings().get("transfer_auto_refresh_enabled", default)
+    return value if isinstance(value, bool) else default
+
+
+def set_transfer_auto_refresh_enabled(enabled: bool) -> bool:
+    """Persist whether transfer/mutation completion should refresh affected panes."""
+    value = bool(enabled)
+    update_settings({"transfer_auto_refresh_enabled": value})
     return value
 
 

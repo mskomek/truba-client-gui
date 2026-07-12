@@ -37,7 +37,10 @@ from PySide6.QtWidgets import (
 
 from truba_gui.core.i18n import t
 from truba_gui.core.ui_errors import show_exception
-from truba_gui.config.storage import get_transfer_parallelism
+from truba_gui.config.storage import (
+    get_transfer_auto_refresh_enabled,
+    get_transfer_parallelism,
+)
 from truba_gui.services.file_clipboard import get_file_clipboard
 from truba_gui.services.files_base import RemoteEntry
 from truba_gui.services.transfer_mode import (
@@ -79,17 +82,34 @@ def _fmt_mtime(ts: int) -> str:
 
 def _file_type(name: str, is_dir: bool) -> str:
     if is_dir:
-        return t("dirs.type_folder") if t("dirs.type_folder") != "[dirs.type_folder]" else "Klasör"
+        return t("dirs.type_folder")
     lower = name.lower()
     if lower.endswith(".iso"):
-        return "Disc Image File"
+        return t("dirs.type_disc_image")
     if lower.endswith((".zip", ".rar", ".7z")):
-        return "WinRAR ZIP archive"
+        return t("dirs.type_zip_archive")
     if lower.endswith((".tgz", ".tar.gz", ".tar")):
-        return "TAR archive"
+        return t("dirs.type_tar_archive")
     if "." in name:
-        return name.split(".")[-1].upper() + " File"
-    return "File"
+        return t("dirs.type_extension_file").format(ext=name.split(".")[-1].upper())
+    return t("dirs.type_file")
+
+
+def _file_type_sort_value(name: str, is_dir: bool) -> str:
+    if is_dir:
+        return "folder"
+    lower = name.lower()
+    if lower.endswith(".iso"):
+        return "iso"
+    if lower.endswith((".zip", ".rar", ".7z")):
+        return lower.rsplit(".", 1)[-1]
+    if lower.endswith(".tar.gz"):
+        return "tar.gz"
+    if lower.endswith((".tgz", ".tar")):
+        return lower.rsplit(".", 1)[-1]
+    if "." in name:
+        return name.rsplit(".", 1)[-1]
+    return "file"
 
 
 def _category(entry: RemoteEntry) -> str:
@@ -108,21 +128,39 @@ def _category(entry: RemoteEntry) -> str:
 MIME_REMOTE_PATHS = "application/x-truba-remote-paths"
 DIRECTORY_CACHE_TTL_SECONDS = 600.0
 
+REMOTE_CONTEXT_MENU_KEYS = [
+    "dirs.download",
+    "dirs.save_as",
+    "dirs.add_files_to_queue",
+    "dirs.view_edit",
+    "dirs.edit_in_new_window",
+    "dirs.open_in_new_tab",
+    "dirs.create_directory",
+    "dirs.create_directory_enter",
+    "dirs.create_new_file",
+    "dirs.refresh",
+    "dirs.delete",
+    "dirs.rename",
+    "dirs.copy_urls",
+    "dirs.file_permissions",
+]
 REMOTE_CONTEXT_MENU_LABELS = [
-    "Download",
-    "Add files to queue",
-    "View/Edit",
-    "Open in new tab",
+    "dirs.download",
+    "dirs.save_as",
+    "dirs.add_files_to_queue",
+    "dirs.view_edit",
+    "dirs.edit_in_new_window",
+    "dirs.open_in_new_tab",
     "---",
-    "Create directory",
-    "Create directory and enter it",
-    "Create new file",
-    "Refresh",
+    "dirs.create_directory",
+    "dirs.create_directory_enter",
+    "dirs.create_new_file",
+    "dirs.refresh",
     "---",
-    "Delete",
-    "Rename",
-    "Copy URL(s) to clipboard",
-    "File permissions...",
+    "dirs.delete",
+    "dirs.rename",
+    "dirs.copy_urls",
+    "dirs.file_permissions",
 ]
 
 _SORT_NAME_ROLE = Qt.ItemDataRole.UserRole + 10
@@ -137,11 +175,6 @@ def _natural_sort_key(value: str) -> tuple:
         for part in re.split(r"(\d+)", value or "")
         if part
     )
-
-
-def _tr(key: str, fallback: str) -> str:
-    value = t(key)
-    return fallback if value == f"[{key}]" else value
 
 
 @dataclass
@@ -255,6 +288,46 @@ class _RemoteTree(QTreeWidget):
         self.header().setSectionsClickable(True)
         self.header().setSortIndicatorShown(False)
         self.header().sectionClicked.connect(self._on_header_clicked)
+
+    def mouseReleaseEvent(self, event) -> None:  # type: ignore[override]
+        if event.button() == Qt.MouseButton.MiddleButton:
+            item = self.itemAt(event.position().toPoint())
+            if item is not None:
+                path = str(item.data(0, Qt.ItemDataRole.UserRole) or "")
+                is_dir = bool(item.data(0, Qt.ItemDataRole.UserRole + 1))
+                is_parent = bool(item.data(0, Qt.ItemDataRole.UserRole + 2))
+                if path and is_dir and not is_parent:
+                    if self._panel.open_directory_in_new_tab(path):
+                        event.accept()
+                        return
+        super().mouseReleaseEvent(event)
+
+    def move_current_for_key(self, key: Qt.Key) -> None:
+        count = self.topLevelItemCount()
+        if count <= 0:
+            return
+        current = self.currentItem()
+        current_index = self.indexOfTopLevelItem(current) if current is not None else -1
+        if current_index < 0:
+            current_index = 0
+        if key == Qt.Key.Key_Home:
+            target_index = 0
+        elif key == Qt.Key.Key_End:
+            target_index = count - 1
+        else:
+            row_height = self.sizeHintForRow(max(0, current_index))
+            if row_height <= 0:
+                row_height = max(1, self.fontMetrics().height())
+            page_rows = max(1, self.viewport().height() // row_height - 1)
+            delta = -page_rows if key == Qt.Key.Key_PageUp else page_rows
+            target_index = max(0, min(count - 1, current_index + delta))
+        target = self.topLevelItem(target_index)
+        if target is None:
+            return
+        self.clearSelection()
+        target.setSelected(True)
+        self.setCurrentItem(target)
+        self.scrollToItem(target)
 
     def _on_header_clicked(self, column: int) -> None:
         if column < 0 or column >= 4:
@@ -385,8 +458,13 @@ class _RemoteTree(QTreeWidget):
 
 class RemoteDirPanel(QWidget):
     open_file = Signal(str)  # remote path (file double click)
+    open_file_in_new_window = Signal(str)
     file_activated = Signal(str)
     open_in_slot = Signal(int, str)  # slot_index(0/1), remote path
+    open_in_slot_new_window = Signal(int, str)
+    open_in_slot_new_tab = Signal(int, str)
+    open_in_existing_follower = Signal(str, int, str)
+    open_file_follow_new_window = Signal(str)
     submit_requested = Signal(str)  # remote Slurm script path
     set_default_requested = Signal()
 
@@ -405,6 +483,11 @@ class RemoteDirPanel(QWidget):
         self._category_dir = ""
         self.title = title
         self._transfer_mode_provider: Optional[Callable[[str], str]] = None
+        self._default_download_dir_provider: Optional[Callable[[], str]] = None
+        self._download_finished_callback: Optional[Callable[[str], None]] = None
+        self._output_target_provider: Optional[
+            Callable[[], List[Tuple[str, str]]]
+        ] = None
         self._transfer_activity_callback: Optional[
             Callable[[str, List[TransferItem], str], None]
         ] = None
@@ -421,33 +504,40 @@ class RemoteDirPanel(QWidget):
         self.path = QLineEdit()
         self.path.returnPressed.connect(self._open_path_field)
 
-        self.btn_upload = QPushButton(t("dirs.upload") if t("dirs.upload") != "[dirs.upload]" else "Yükle")
+        self.search_label = QLabel(t("dirs.search_label"))
+        self.search_in = QLineEdit()
+        self.search_in.setPlaceholderText(t("dirs.search_placeholder"))
+        self.search_in.textChanged.connect(lambda _text: self.refresh())
+        self.btn_search_clear = QPushButton(t("dirs.search_clear"))
+        self.btn_search_clear.clicked.connect(self.search_in.clear)
+
+        self.btn_upload = QPushButton(t("dirs.upload"))
         self.btn_upload.clicked.connect(self.upload_files)
 
         self.btn_new_folder = QPushButton(
-            t("dirs.new_folder") if t("dirs.new_folder") != "[dirs.new_folder]" else "Yeni Klasör"
+            t("dirs.new_folder")
         )
         self.btn_new_folder.clicked.connect(self.create_new_folder)
 
         self.btn_new_file = QPushButton(
-            t("dirs.new_file") if t("dirs.new_file") != "[dirs.new_file]" else "Yeni Dosya"
+            t("dirs.new_file")
         )
         self.btn_new_file.clicked.connect(self.create_new_file)
 
         self.btn_template_upload = QPushButton(
-            t("dirs.template_upload") if t("dirs.template_upload") != "[dirs.template_upload]" else "Template Upload"
+            t("dirs.template_upload")
         )
         self.btn_template_upload.clicked.connect(self.show_template_upload_menu)
 
         self.btn_download = QPushButton(
-            t("dirs.download_selected") if t("dirs.download_selected") != "[dirs.download_selected]" else "Seçilenleri İndir"
+            t("dirs.download_selected")
         )
         self.btn_download.clicked.connect(self.download_selected)
 
-        self.btn_delete = QPushButton(t("dirs.delete") if t("dirs.delete") != "[dirs.delete]" else "Sil")
+        self.btn_delete = QPushButton(t("dirs.delete"))
         self.btn_delete.clicked.connect(self.delete_selected)
 
-        self.btn_undo = QPushButton(t("dirs.undo") if t("dirs.undo") != "[dirs.undo]" else "Geri Al")
+        self.btn_undo = QPushButton(t("dirs.undo"))
         self.btn_undo.clicked.connect(self.undo_last)
 
         self.btn_parent = QToolButton()
@@ -457,7 +547,7 @@ class RemoteDirPanel(QWidget):
         self.btn_parent.clicked.connect(self.go_parent)
         self.btn_parent.setEnabled(False)
 
-        self.btn_refresh = QPushButton(t("dirs.refresh") if t("dirs.refresh") != "[dirs.refresh]" else "Yenile")
+        self.btn_refresh = QPushButton(t("dirs.refresh"))
         self.btn_refresh.clicked.connect(lambda: self.refresh(force=True))
 
         self.refresh_shortcut = QShortcut(QKeySequence.Refresh, self)
@@ -480,7 +570,9 @@ class RemoteDirPanel(QWidget):
         self.directory_tabs = QTabBar()
         self.directory_tabs.setExpanding(False)
         self.directory_tabs.setMovable(True)
+        self.directory_tabs.setTabsClosable(True)
         self.directory_tabs.currentChanged.connect(self._on_directory_tab_changed)
+        self.directory_tabs.tabCloseRequested.connect(self._close_directory_tab)
 
         self.tabs = QTabWidget()
         self.views: Dict[str, _RemoteTree] = {
@@ -491,14 +583,14 @@ class RemoteDirPanel(QWidget):
             "slurm": self._make_view(),
             "other": self._make_view(),
         }
-        self.tabs.addTab(self.views["all"], t("dirs.tab_all") if t("dirs.tab_all") != "[dirs.tab_all]" else "Tümü")
-        self.tabs.addTab(self.views["folders"], t("dirs.tab_folders") if t("dirs.tab_folders") != "[dirs.tab_folders]" else "Klasörler")
-        self.tabs.addTab(self.views["iso"], t("dirs.tab_iso") if t("dirs.tab_iso") != "[dirs.tab_iso]" else "ISO")
+        self.tabs.addTab(self.views["all"], t("dirs.tab_all"))
+        self.tabs.addTab(self.views["folders"], t("dirs.tab_folders"))
+        self.tabs.addTab(self.views["iso"], t("dirs.tab_iso"))
         self.tabs.addTab(
-            self.views["archives"], t("dirs.tab_archives") if t("dirs.tab_archives") != "[dirs.tab_archives]" else "Arşivler"
+            self.views["archives"], t("dirs.tab_archives")
         )
-        self.tabs.addTab(self.views["slurm"], t("dirs.tab_slurm") if t("dirs.tab_slurm") != "[dirs.tab_slurm]" else "Slurm")
-        self.tabs.addTab(self.views["other"], t("dirs.tab_other") if t("dirs.tab_other") != "[dirs.tab_other]" else "Diğer")
+        self.tabs.addTab(self.views["slurm"], t("dirs.tab_slurm"))
+        self.tabs.addTab(self.views["other"], t("dirs.tab_other"))
         self.tabs.currentChanged.connect(self._on_tab_changed)
 
         lay = QVBoxLayout(self)
@@ -506,11 +598,16 @@ class RemoteDirPanel(QWidget):
         self.path_label = QLabel(t("dirs.path"))
         lay.addWidget(self.path_label)
         lay.addWidget(self.path)
+        search_row = QHBoxLayout()
+        search_row.addWidget(self.search_label)
+        search_row.addWidget(self.search_in, 1)
+        search_row.addWidget(self.btn_search_clear)
+        lay.addLayout(search_row)
         lay.addWidget(self.directory_tabs)
         lay.addWidget(self.tabs)
 
         # Transfer queue (batch view)
-        self.queue_group = QGroupBox(t("dirs.queue_title") if t("dirs.queue_title") != "[dirs.queue_title]" else "İşlem Kuyruğu")
+        self.queue_group = QGroupBox(t("dirs.queue_title"))
         qlay = QVBoxLayout(self.queue_group)
         self.queue_current = QLabel("-")
         self.queue_list = QListWidget()
@@ -544,6 +641,9 @@ class RemoteDirPanel(QWidget):
         self.btn_undo.setText(t("dirs.undo"))
         self.btn_refresh.setText(t("dirs.refresh"))
         self.path_label.setText(t("dirs.path"))
+        self.search_label.setText(t("dirs.search_label"))
+        self.search_in.setPlaceholderText(t("dirs.search_placeholder"))
+        self.btn_search_clear.setText(t("dirs.search_clear"))
         self.queue_group.setTitle(t("dirs.queue_title"))
         self.queue_current_label.setText(t("dirs.queue_current"))
         self.queue_next_label.setText(t("dirs.queue_pending"))
@@ -568,10 +668,10 @@ class RemoteDirPanel(QWidget):
         w.setColumnCount(4)
         w.setHeaderLabels(
             [
-                t("dirs.col_name") if t("dirs.col_name") != "[dirs.col_name]" else "Filename",
-                t("dirs.col_size") if t("dirs.col_size") != "[dirs.col_size]" else "Filesize",
-                t("dirs.col_type") if t("dirs.col_type") != "[dirs.col_type]" else "Filetype",
-                t("dirs.col_mtime") if t("dirs.col_mtime") != "[dirs.col_mtime]" else "Last modified",
+                t("dirs.col_name"),
+                t("dirs.col_size"),
+                t("dirs.col_type"),
+                t("dirs.col_mtime"),
             ]
         )
         w.setRootIsDecorated(False)
@@ -602,6 +702,14 @@ class RemoteDirPanel(QWidget):
         self._category_dir = remote_dir
         self.path.setText(remote_dir)
         self.refresh()
+
+    def _close_directory_tab(self, index: int) -> None:
+        if self.directory_tabs.count() <= 1 or index < 0:
+            return
+        was_current = index == self.directory_tabs.currentIndex()
+        self.directory_tabs.removeTab(index)
+        if was_current:
+            self._on_directory_tab_changed(self.directory_tabs.currentIndex())
 
     def open_directory_in_new_tab(self, remote_dir: str) -> bool:
         if not self.session or not self.session.get("files"):
@@ -640,11 +748,23 @@ class RemoteDirPanel(QWidget):
             if e.key() == Qt.Key.Key_Backspace and not e.modifiers():
                 self.go_parent()
                 return True
-            if e.key() == Qt.Key.Key_Delete:
-                self.delete_selected()
+            if e.key() == Qt.Key.Key_Delete and e.modifiers() in (
+                Qt.KeyboardModifier.NoModifier,
+                Qt.KeyboardModifier.ControlModifier,
+            ):
+                self._delete_paths(self._selected_paths_from_view(watched))
+                return True
+            if e.key() in (
+                Qt.Key.Key_PageUp,
+                Qt.Key.Key_PageDown,
+                Qt.Key.Key_Home,
+                Qt.Key.Key_End,
+            ) and not e.modifiers():
+                if isinstance(watched, _RemoteTree):
+                    watched.move_current_for_key(e.key())
                 return True
             if e.key() == Qt.Key.Key_F5 and not e.modifiers():
-                self.refresh()
+                self.refresh(force=True)
                 return True
             if e.key() == Qt.Key.Key_F2 and not e.modifiers():
                 if self.rename_selected(watched):
@@ -679,6 +799,23 @@ class RemoteDirPanel(QWidget):
     ) -> None:
         self._transfer_mode_provider = provider
 
+    def set_default_download_dir_provider(
+        self, provider: Optional[Callable[[], str]],
+    ) -> None:
+        self._default_download_dir_provider = provider
+
+    def set_download_finished_callback(
+        self,
+        callback: Optional[Callable[[str], None]],
+    ) -> None:
+        self._download_finished_callback = callback
+
+    def set_output_target_provider(
+        self,
+        provider: Optional[Callable[[], List[Tuple[str, str]]]],
+    ) -> None:
+        self._output_target_provider = provider
+
     def set_transfer_activity_callback(
         self,
         callback: Optional[Callable[[str, List[TransferItem], str], None]],
@@ -695,6 +832,20 @@ class RemoteDirPanel(QWidget):
             return normalize_transfer_mode(self._transfer_mode_provider(path), BINARY)
         except Exception:
             return BINARY
+
+    def _default_download_dir(self) -> str:
+        if self._default_download_dir_provider is None:
+            return ""
+        try:
+            return str(self._default_download_dir_provider() or "")
+        except Exception:
+            return ""
+
+    def _finish_local_download_mutation(self, target_dir: str, after_finished=None) -> None:
+        if after_finished is not None:
+            after_finished()
+        elif self._download_finished_callback is not None:
+            self._download_finished_callback(target_dir)
 
     def set_dir(self, remote_dir: str):
         target = (remote_dir or "").rstrip("/") or "/"
@@ -748,6 +899,9 @@ class RemoteDirPanel(QWidget):
         for panel in panels:
             for remote_dir in affected:
                 panel._invalidate_directory_cache(remote_dir)
+
+        if not get_transfer_auto_refresh_enabled():
+            return
 
         for panel in panels:
             current = self._normalize_remote_dir(panel.current_dir or "/")
@@ -963,6 +1117,8 @@ class RemoteDirPanel(QWidget):
         for v in self.views.values():
             v.clear()
 
+        search_terms = self._search_terms()
+
         def add(view: QTreeWidget, entry: RemoteEntry):
             it = QTreeWidgetItem()
             it.setText(0, entry.name)
@@ -975,7 +1131,7 @@ class RemoteDirPanel(QWidget):
             it.setData(0, Qt.ItemDataRole.UserRole + 1, bool(entry.is_dir))
             it.setData(0, _SORT_NAME_ROLE, entry.name)
             it.setData(0, _SORT_SIZE_ROLE, int(entry.size or 0))
-            it.setData(0, _SORT_TYPE_ROLE, file_type)
+            it.setData(0, _SORT_TYPE_ROLE, _file_type_sort_value(entry.name, entry.is_dir))
             it.setData(0, _SORT_MTIME_ROLE, int(entry.mtime or 0))
             view.addTopLevelItem(it)
 
@@ -993,7 +1149,7 @@ class RemoteDirPanel(QWidget):
                 item.setData(0, Qt.ItemDataRole.UserRole + 2, True)
                 item.setData(0, _SORT_NAME_ROLE, "..")
                 item.setData(0, _SORT_SIZE_ROLE, 0)
-                item.setData(0, _SORT_TYPE_ROLE, _file_type("..", True))
+                item.setData(0, _SORT_TYPE_ROLE, _file_type_sort_value("..", True))
                 item.setData(0, _SORT_MTIME_ROLE, 0)
                 return item
 
@@ -1002,6 +1158,8 @@ class RemoteDirPanel(QWidget):
                 self.views["folders"].addTopLevelItem(make_parent_item())
 
         for e in entries:
+            if not self._entry_matches_search(e, search_terms):
+                continue
             add(self.views["all"], e)
             cat = _category(e)
             if cat in self.views:
@@ -1016,6 +1174,32 @@ class RemoteDirPanel(QWidget):
 
         self._update_undo_enabled()
         self._update_navigation_controls()
+
+    def _search_terms(self) -> List[str]:
+        text = ""
+        if hasattr(self, "search_in"):
+            text = self.search_in.text()
+        return [part.casefold() for part in text.split() if part.strip()]
+
+    def _entry_matches_search(self, entry: RemoteEntry, terms: List[str]) -> bool:
+        if not terms:
+            return True
+        file_type = _file_type(entry.name, entry.is_dir)
+        size_text = "" if entry.is_dir else _fmt_size(entry.size)
+        searchable = " ".join(
+            str(value)
+            for value in (
+                entry.name,
+                entry.path,
+                size_text,
+                int(entry.size or 0),
+                file_type,
+                _file_type_sort_value(entry.name, entry.is_dir),
+                _fmt_mtime(entry.mtime),
+            )
+            if value is not None
+        ).casefold()
+        return all(term in searchable for term in terms)
 
     # ---------- selection helpers ----------
     def _selected_paths_from_view(self, view: QTreeWidget) -> List[str]:
@@ -1176,27 +1360,72 @@ class RemoteDirPanel(QWidget):
         clipboard = get_file_clipboard()
 
         new_parent_dir = clicked_path if clicked_path and clicked_is_dir else (self.current_dir or "/")
-        act_download = menu.addAction(REMOTE_CONTEXT_MENU_LABELS[0])
-        act_add_queue = menu.addAction(REMOTE_CONTEXT_MENU_LABELS[1])
-        act_view_edit = menu.addAction(REMOTE_CONTEXT_MENU_LABELS[2])
-        act_open_new_tab = menu.addAction(REMOTE_CONTEXT_MENU_LABELS[3])
+        act_download = menu.addAction(t(REMOTE_CONTEXT_MENU_KEYS[0]))
+        act_save_as = menu.addAction(t(REMOTE_CONTEXT_MENU_KEYS[1]))
+        act_add_queue = menu.addAction(t(REMOTE_CONTEXT_MENU_KEYS[2]))
+        act_view_edit = menu.addAction(t(REMOTE_CONTEXT_MENU_KEYS[3]))
+        act_edit_new_window = menu.addAction(t(REMOTE_CONTEXT_MENU_KEYS[4]))
+        act_open_new_tab = menu.addAction(t(REMOTE_CONTEXT_MENU_KEYS[5]))
         act_submit = None
         if submit_path:
-            act_submit = menu.addAction(_tr("dirs.submit_sbatch", "Submit with sbatch"))
+            act_submit = menu.addAction(t("dirs.submit_sbatch"))
         act_open_out1 = None
         act_open_out2 = None
+        existing_output_actions: Dict[object, Tuple[str, int]] = {}
         if self.enable_output_menu:
             act_open_out1 = menu.addAction(
-                _tr("jobs_outputs.open_out1", "Follow in Output 1")
+                t("jobs_outputs.open_out1")
             )
             act_open_out2 = menu.addAction(
-                _tr("jobs_outputs.open_out2", "Follow in Output 2")
+                t("jobs_outputs.open_out2")
             )
+            act_open_file_new_window = menu.addAction(
+                t("jobs_outputs.open_file_new_window")
+            )
+            act_open_out1_new_window = menu.addAction(
+                t("jobs_outputs.open_out1_new_window")
+            )
+            act_open_out2_new_window = menu.addAction(
+                t("jobs_outputs.open_out2_new_window")
+            )
+            act_open_out1_new_tab = menu.addAction(
+                t("jobs_outputs.open_out1_new_tab")
+            )
+            act_open_out2_new_tab = menu.addAction(
+                t("jobs_outputs.open_out2_new_tab")
+            )
+            output_targets: List[Tuple[str, str]] = []
+            if self._output_target_provider is not None:
+                try:
+                    output_targets = list(self._output_target_provider() or [])
+                except Exception:
+                    output_targets = []
+            if output_targets:
+                menu.addSeparator()
+                for target_id, target_label in output_targets:
+                    act_existing_out1 = menu.addAction(
+                        t("jobs_outputs.assign_existing_out1").format(
+                            target=target_label
+                        )
+                    )
+                    act_existing_out2 = menu.addAction(
+                        t("jobs_outputs.assign_existing_out2").format(
+                            target=target_label
+                        )
+                    )
+                    existing_output_actions[act_existing_out1] = (target_id, 0)
+                    existing_output_actions[act_existing_out2] = (target_id, 1)
+        else:
+            act_open_file_new_window = None
+            act_open_out1_new_window = None
+            act_open_out2_new_window = None
+            act_open_out1_new_tab = None
+            act_open_out2_new_tab = None
         menu.addSeparator()
-        act_new_folder = menu.addAction(REMOTE_CONTEXT_MENU_LABELS[5])
-        act_new_folder_enter = menu.addAction(REMOTE_CONTEXT_MENU_LABELS[6])
-        act_new_file = menu.addAction(REMOTE_CONTEXT_MENU_LABELS[7])
-        act_refresh = menu.addAction(REMOTE_CONTEXT_MENU_LABELS[8])
+        act_new_folder = menu.addAction(t(REMOTE_CONTEXT_MENU_KEYS[6]))
+        act_new_folder_enter = menu.addAction(t(REMOTE_CONTEXT_MENU_KEYS[7]))
+        act_new_file = menu.addAction(t(REMOTE_CONTEXT_MENU_KEYS[8]))
+        act_refresh = menu.addAction(t(REMOTE_CONTEXT_MENU_KEYS[9]))
         menu.addSeparator()
         sys_clip = QApplication.clipboard().mimeData()
         has_local_urls = bool(self._local_paths_from_mime(sys_clip))
@@ -1209,21 +1438,21 @@ class RemoteDirPanel(QWidget):
         act_undo = None
         if has_local_urls:
             act_paste_local_here = menu.addAction(
-                _tr("dirs.paste_from_local", "Paste from local")
+                t("dirs.paste_from_local")
             )
             if clicked_path and clicked_is_dir:
                 act_paste_local_into = menu.addAction(
-                    _tr("dirs.paste_from_local_into", "Paste from local into folder")
+                    t("dirs.paste_from_local_into")
                 )
         if clip and clip.paths:
-            act_paste_here = menu.addAction(_tr("dirs.paste", "Paste"))
+            act_paste_here = menu.addAction(t("dirs.paste"))
             if clicked_path and clicked_is_dir:
-                act_paste_into = menu.addAction(_tr("dirs.paste_into", "Paste into folder"))
+                act_paste_into = menu.addAction(t("dirs.paste_into"))
             act_paste_to_local = menu.addAction(
-                _tr("dirs.paste_to_local", "Paste to local (download)")
+                t("dirs.paste_to_local")
             )
         if RemoteDirPanel._last_undo is not None:
-            act_undo = menu.addAction(_tr("dirs.undo", "Undo"))
+            act_undo = menu.addAction(t("dirs.undo"))
         if any(
             action is not None
             for action in (
@@ -1233,24 +1462,39 @@ class RemoteDirPanel(QWidget):
             )
         ):
             menu.addSeparator()
-        act_delete = menu.addAction(REMOTE_CONTEXT_MENU_LABELS[10])
-        act_rename = menu.addAction(REMOTE_CONTEXT_MENU_LABELS[11])
-        act_copy_path = menu.addAction(REMOTE_CONTEXT_MENU_LABELS[12])
-        act_copy = menu.addAction(_tr("dirs.copy", "Copy"))
-        act_move = menu.addAction(_tr("dirs.move", "Move"))
-        act_permissions = menu.addAction(REMOTE_CONTEXT_MENU_LABELS[13])
+        act_delete = menu.addAction(t(REMOTE_CONTEXT_MENU_KEYS[10]))
+        act_rename = menu.addAction(t(REMOTE_CONTEXT_MENU_KEYS[11]))
+        act_copy_path = menu.addAction(t(REMOTE_CONTEXT_MENU_KEYS[12]))
+        act_copy = menu.addAction(t("dirs.copy"))
+        act_move = menu.addAction(t("dirs.move"))
+        act_permissions = menu.addAction(t(REMOTE_CONTEXT_MENU_KEYS[13]))
 
         has_selection = bool(sel_paths)
         single_selection = len(sel_paths) == 1
         single_selection_is_dir = bool(selected_entries[0][1]) if single_selection else False
         act_download.setEnabled(has_selection)
+        act_save_as.setEnabled(has_selection)
         act_add_queue.setEnabled(False)
         act_view_edit.setEnabled(single_selection and not single_selection_is_dir)
+        act_edit_new_window.setEnabled(single_selection and not single_selection_is_dir)
         act_open_new_tab.setEnabled(single_selection and single_selection_is_dir)
         if act_open_out1 is not None:
             act_open_out1.setEnabled(single_selection and not single_selection_is_dir)
         if act_open_out2 is not None:
             act_open_out2.setEnabled(single_selection and not single_selection_is_dir)
+        if act_open_file_new_window is not None:
+            act_open_file_new_window.setEnabled(single_selection and not single_selection_is_dir)
+        if act_open_out1_new_window is not None:
+            act_open_out1_new_window.setEnabled(single_selection and not single_selection_is_dir)
+        if act_open_out2_new_window is not None:
+            act_open_out2_new_window.setEnabled(single_selection and not single_selection_is_dir)
+        if act_open_out1_new_tab is not None:
+            act_open_out1_new_tab.setEnabled(single_selection and not single_selection_is_dir)
+        if act_open_out2_new_tab is not None:
+            act_open_out2_new_tab.setEnabled(single_selection and not single_selection_is_dir)
+        for action in existing_output_actions:
+            if hasattr(action, "setEnabled"):
+                action.setEnabled(single_selection and not single_selection_is_dir)
         act_delete.setEnabled(has_selection)
         act_rename.setEnabled(single_selection)
         act_copy_path.setEnabled(has_selection)
@@ -1312,6 +1556,10 @@ class RemoteDirPanel(QWidget):
             self.open_file.emit(rp)
             return
 
+        if chosen == act_edit_new_window:
+            self.open_file_in_new_window.emit(sel_paths[0])
+            return
+
         if chosen == act_open_new_tab and single_selection_is_dir:
             self.open_directory_in_new_tab(sel_paths[0])
             return
@@ -1324,7 +1572,36 @@ class RemoteDirPanel(QWidget):
             self.open_in_slot.emit(1, sel_paths[0])
             return
 
+        if act_open_file_new_window is not None and chosen == act_open_file_new_window:
+            self.open_file_follow_new_window.emit(sel_paths[0])
+            return
+
+        if act_open_out1_new_window is not None and chosen == act_open_out1_new_window:
+            self.open_in_slot_new_window.emit(0, sel_paths[0])
+            return
+
+        if act_open_out2_new_window is not None and chosen == act_open_out2_new_window:
+            self.open_in_slot_new_window.emit(1, sel_paths[0])
+            return
+
+        if act_open_out1_new_tab is not None and chosen == act_open_out1_new_tab:
+            self.open_in_slot_new_tab.emit(0, sel_paths[0])
+            return
+
+        if act_open_out2_new_tab is not None and chosen == act_open_out2_new_tab:
+            self.open_in_slot_new_tab.emit(1, sel_paths[0])
+            return
+
+        if chosen in existing_output_actions:
+            target_id, slot = existing_output_actions[chosen]
+            self.open_in_existing_follower.emit(target_id, slot, sel_paths[0])
+            return
+
         if chosen == act_download:
+            self.download_selected(target_dir=self._default_download_dir())
+            return
+
+        if chosen == act_save_as:
             self.download_selected()
             return
 
@@ -1364,7 +1641,7 @@ class RemoteDirPanel(QWidget):
         base = old.split("/")[-1]
         new_name, ok = QInputDialog.getText(
             self,
-            t("dirs.rename") if t("dirs.rename") != "[dirs.rename]" else "Yeniden Adlandır",
+            t("dirs.rename"),
             t("dirs.rename_label"),
             text=base,
         )
@@ -1393,7 +1670,7 @@ class RemoteDirPanel(QWidget):
             msg += f"\n... (+{len(paths)-10})"
         if QMessageBox.question(
             self,
-            t("common.confirm") if t("common.confirm") != "[common.confirm]" else "Onay",
+            t("common.confirm"),
             msg,
         ) != QMessageBox.StandardButton.Yes:
             return
@@ -1620,15 +1897,24 @@ class RemoteDirPanel(QWidget):
             return True
         self._active_transfer_keys.update(active_keys)
         plan = filtered_plan
-        transfer_items = [TransferItem(op=p.op, src=p.src, dst=p.dst, recursive=p.recursive) for p in plan]
+        transfer_items = [self._transfer_item_from_plan(p) for p in plan]
         if self._transfer_activity_callback is not None:
             self._transfer_activity_callback("queued", transfer_items, title)
+        max_parallel_limit = 10
+        parallel_limit = get_transfer_parallelism()
+        files = self.session.get("files") if self.session else None
+        if any(item.op == "download_tree" for item in transfer_items) or not bool(
+            getattr(files, "supports_parallel_transfers", False)
+        ):
+            parallel_limit = 1
+            max_parallel_limit = 1
         dlg = TransferDialog(
             self,
             title=title,
             items=transfer_items,
             run_item=self._execute_transfer_item,
-            parallel_limit=get_transfer_parallelism(),
+            parallel_limit=parallel_limit,
+            max_parallel_limit=max_parallel_limit,
         )
         if self._transfer_activity_callback is not None:
             self._transfer_activity_callback("controller", [dlg], title)
@@ -1662,51 +1948,188 @@ class RemoteDirPanel(QWidget):
 
     @staticmethod
     def _transfer_key(op: _PlannedOp) -> tuple[str, str, str] | None:
-        if op.op not in {"upload", "download"}:
+        if op.op not in {"upload", "download", "download_tree"}:
             return None
         return (op.op, op.src, op.dst)
+
+    def _transfer_item_size(self, op: _PlannedOp) -> Optional[int]:
+        try:
+            if op.op == "download" and self.session and self.session.get("files"):
+                size, _mtime = self.session["files"].stat(op.src)
+                return max(0, int(size or 0))
+            if op.op == "upload" and op.src:
+                path = Path(op.src)
+                if path.exists() and path.is_file():
+                    return max(0, int(path.stat().st_size))
+        except Exception:
+            return None
+        return None
+
+    def _transfer_item_from_plan(self, op: _PlannedOp) -> TransferItem:
+        return TransferItem(
+            op=op.op,
+            src=op.src,
+            dst=op.dst,
+            recursive=op.recursive,
+            size=self._transfer_item_size(op),
+        )
+
+    def _remote_tree_entries_for_download(
+        self,
+        base_remote: str,
+    ) -> List[Tuple[str, str, bool, int]]:
+        files = self.session["files"]
+        base_remote = base_remote.rstrip("/")
+        out: List[Tuple[str, str, bool, int]] = []
+
+        def rec(cur: str, rel: str) -> None:
+            entries = files.listdir_entries(cur)
+            for entry in entries:
+                epath = entry.path.rstrip("/")
+                erel = (rel + "/" if rel else "") + entry.name
+                if entry.is_dir:
+                    out.append((epath, erel, True, 0))
+                    rec(epath, erel)
+                else:
+                    out.append((epath, erel, False, int(entry.size or 0)))
+
+        rec(base_remote, "")
+        return out
+
+    def _download_remote_tree(
+        self,
+        remote_dir: str,
+        local_dir: str,
+        progress_cb=None,
+        files=None,
+    ) -> None:
+        if files is None:
+            if not self.session or not self.session.get("files"):
+                raise RuntimeError(t("common.no_connection"))
+            files = self.session["files"]
+        if files is None:
+            raise RuntimeError(t("common.no_connection"))
+        os.makedirs(local_dir, exist_ok=True)
+        entries = self._remote_tree_entries_for_download_with_backend(files, remote_dir)
+        total = sum(size for _path, _rel, is_dir, size in entries if not is_dir)
+        done = 0
+        if progress_cb is not None:
+            progress_cb(0, total)
+        for rpath, rel, is_dir, size in entries:
+            local_path = os.path.join(local_dir, rel)
+            if is_dir:
+                os.makedirs(local_path, exist_ok=True)
+                continue
+            os.makedirs(os.path.dirname(local_path) or local_dir, exist_ok=True)
+            if os.path.exists(local_path):
+                try:
+                    os.remove(local_path)
+                except IsADirectoryError:
+                    shutil.rmtree(local_path, ignore_errors=True)
+            def file_progress(file_done: int, file_total: int) -> None:
+                if progress_cb is None or total <= 0:
+                    return
+                file_size = max(0, int(size or file_total or 0))
+                progress_cb(min(total, done + min(file_size, int(file_done or 0))), total)
+
+            download_with_mode(
+                files,
+                rpath,
+                local_path,
+                self._requested_transfer_mode(rpath),
+                progress_cb=file_progress,
+            )
+            done += max(0, int(size or 0))
+            if progress_cb is not None and total > 0:
+                progress_cb(done, total)
+
+    def _remote_tree_entries_for_download_with_backend(
+        self,
+        files,
+        base_remote: str,
+    ) -> List[Tuple[str, str, bool, int]]:
+        base_remote = base_remote.rstrip("/")
+        out: List[Tuple[str, str, bool, int]] = []
+
+        def rec(cur: str, rel: str) -> None:
+            entries = files.listdir_entries(cur)
+            for entry in entries:
+                epath = entry.path.rstrip("/")
+                erel = (rel + "/" if rel else "") + entry.name
+                if entry.is_dir:
+                    out.append((epath, erel, True, 0))
+                    rec(epath, erel)
+                else:
+                    out.append((epath, erel, False, int(entry.size or 0)))
+
+        rec(base_remote, "")
+        return out
 
     def _execute_transfer_item(self, item: TransferItem, progress_cb=None) -> None:
         if not self.session or not self.session.get("files"):
             raise RuntimeError(t("common.no_connection"))
         files = self.session["files"]
+        transfer_files = self._open_transfer_backend(files)
         op = item.op
-        if op == "delete":
-            files.remove(item.dst, recursive=item.recursive)
-        elif op == "copy":
-            files.copy(item.src, item.dst, recursive=item.recursive)
-        elif op == "move":
-            files.move(item.src, item.dst)
-        elif op == "upload":
-            upload_with_mode(
-                files,
-                item.src,
-                item.dst,
-                self._requested_transfer_mode(item.src),
-                progress_cb=progress_cb,
-            )
-        elif op == "download":
-            download_with_mode(
-                files,
-                item.src,
-                item.dst,
-                self._requested_transfer_mode(item.src),
-                progress_cb=progress_cb,
-            )
-        elif op == "mkdir_remote":
-            files.mkdir(item.dst)
-        elif op == "mkdir_local":
-            os.makedirs(item.dst, exist_ok=True)
-        elif op == "delete_local":
-            if os.path.isdir(item.dst):
-                shutil.rmtree(item.dst, ignore_errors=True)
+        try:
+            if op == "delete":
+                transfer_files.remove(item.dst, recursive=item.recursive)
+            elif op == "copy":
+                transfer_files.copy(item.src, item.dst, recursive=item.recursive)
+            elif op == "move":
+                transfer_files.move(item.src, item.dst)
+            elif op == "upload":
+                upload_with_mode(
+                    transfer_files,
+                    item.src,
+                    item.dst,
+                    self._requested_transfer_mode(item.src),
+                    progress_cb=progress_cb,
+                )
+            elif op == "download":
+                download_with_mode(
+                    transfer_files,
+                    item.src,
+                    item.dst,
+                    self._requested_transfer_mode(item.src),
+                    progress_cb=progress_cb,
+                )
+            elif op == "download_tree":
+                self._download_remote_tree(
+                    item.src,
+                    item.dst,
+                    progress_cb=progress_cb,
+                    files=transfer_files,
+                )
+            elif op == "mkdir_remote":
+                transfer_files.mkdir(item.dst)
+            elif op == "mkdir_local":
+                os.makedirs(item.dst, exist_ok=True)
+            elif op == "delete_local":
+                if os.path.isdir(item.dst):
+                    shutil.rmtree(item.dst, ignore_errors=True)
+                else:
+                    try:
+                        os.remove(item.dst)
+                    except FileNotFoundError:
+                        pass
             else:
-                try:
-                    os.remove(item.dst)
-                except FileNotFoundError:
-                    pass
-        else:
-            raise RuntimeError(f"Unknown op: {op}")
+                raise RuntimeError(f"Unknown op: {op}")
+        finally:
+            if transfer_files is not files:
+                close = getattr(transfer_files, "close", None)
+                if callable(close):
+                    close()
+
+    @staticmethod
+    def _open_transfer_backend(files):
+        opener = getattr(files, "open_transfer_backend", None)
+        if callable(opener):
+            try:
+                return opener()
+            except Exception:
+                return files
+        return files
 
     def shutdown(self) -> None:
         """Cancel any in-flight batch operation (best-effort).
@@ -1838,7 +2261,13 @@ class RemoteDirPanel(QWidget):
                             isdir = bool(files.is_dir(dst))
                         except Exception:
                             isdir = False
-                        plan.append(_PlannedOp(op="delete", src="", dst=dst, recursive=isdir))
+                        if recursive and isdir:
+                            if op == "move":
+                                plan.append(_PlannedOp(op="copy", src=src_clean, dst=dst, recursive=True))
+                                plan.append(_PlannedOp(op="delete", src="", dst=src_clean, recursive=True))
+                                break
+                        else:
+                            plan.append(_PlannedOp(op="delete", src="", dst=dst, recursive=isdir))
 
                 plan.append(_PlannedOp(op=op, src=src_clean, dst=dst, recursive=recursive))
                 break
@@ -1949,7 +2378,12 @@ class RemoteDirPanel(QWidget):
         rec(base_remote, "")
         return out
 
-    def _apply_remote_download(self, src_paths: List[str], target_dir: str) -> bool:
+    def _apply_remote_download(
+        self,
+        src_paths: List[str],
+        target_dir: str,
+        after_finished=None,
+    ) -> bool:
         if not self.session or not self.session.get("files"):
             return False
         files = self.session["files"]
@@ -2001,7 +2435,8 @@ class RemoteDirPanel(QWidget):
                     local_dst = new_dst
                     continue
                 if action_simple == "overwrite":
-                    plan.append(_PlannedOp(op="delete_local", src="", dst=local_dst, recursive=is_dir))
+                    if not (is_dir and os.path.isdir(local_dst)):
+                        plan.append(_PlannedOp(op="delete_local", src="", dst=local_dst, recursive=is_dir))
                     break
                 if action_simple == "resume":
                     break
@@ -2012,24 +2447,18 @@ class RemoteDirPanel(QWidget):
             if not is_dir:
                 plan.append(_PlannedOp(op="download", src=src_clean, dst=local_dst))
             else:
-                # mkdir base local
-                plan.append(_PlannedOp(op="mkdir_local", src="", dst=local_dst, recursive=False))
-                # walk remote dir and download files
-                for rpath, rel, r_is_dir in self._remote_walk(src_clean):
-                    if rel == "":
-                        continue
-                    lp = os.path.join(local_dst, rel)
-                    if r_is_dir:
-                        plan.append(_PlannedOp(op="mkdir_local", src="", dst=lp))
-                    else:
-                        # local file overwrite within folder: best-effort overwrite
-                        if os.path.exists(lp):
-                            plan.append(_PlannedOp(op="delete_local", src="", dst=lp, recursive=False))
-                        plan.append(_PlannedOp(op="download", src=rpath, dst=lp))
+                plan.append(_PlannedOp(op="download_tree", src=src_clean, dst=local_dst))
 
         if not plan:
             return True
-        ok = self._run_plan_with_progress(plan, "İndiriliyor...")
+        ok = self._run_plan_with_progress(
+            plan,
+            "İndiriliyor...",
+            after_finished=lambda: self._finish_local_download_mutation(
+                target_dir,
+                after_finished,
+            ),
+        )
         return ok
 
     def _apply_local_upload(self, local_paths: List[str], dest_dir: str) -> bool:
@@ -2095,7 +2524,8 @@ class RemoteDirPanel(QWidget):
                             isdir_remote = bool(files.is_dir(rp_base))
                         except Exception:
                             isdir_remote = False
-                        plan.append(_PlannedOp(op="delete", src="", dst=rp_base, recursive=isdir_remote))
+                        if not (is_dir and isdir_remote):
+                            plan.append(_PlannedOp(op="delete", src="", dst=rp_base, recursive=isdir_remote))
                     elif action_simple == "resume":
                         pass
                 break
@@ -2152,7 +2582,7 @@ class RemoteDirPanel(QWidget):
 
         menu = QMenu(self)
         act_extract_iso = menu.addAction(
-            t("dirs.template_extract_iso") if t("dirs.template_extract_iso") != "[dirs.template_extract_iso]" else "extract_iso.py"
+            t("dirs.template_extract_iso")
         )
         chosen = menu.exec(self.btn_template_upload.mapToGlobal(self.btn_template_upload.rect().bottomLeft()))
         if chosen != act_extract_iso:
@@ -2170,9 +2600,7 @@ class RemoteDirPanel(QWidget):
             QMessageBox.warning(
                 self,
                 t("common.error"),
-                t("dirs.template_missing").format(path=str(template_path))
-                if t("dirs.template_missing") != "[dirs.template_missing]"
-                else f"Template file not found: {template_path}",
+                t("dirs.template_missing").format(path=str(template_path)),
             )
             return False
         return self._apply_local_upload([str(template_path)], self.current_dir)
@@ -2185,15 +2613,15 @@ class RemoteDirPanel(QWidget):
         if not self.current_dir:
             QMessageBox.warning(self, t("common.error"), t("dirs.no_directory_selected"))
             return
-        paths, _ = QFileDialog.getOpenFileNames(self, t("dirs.upload") if t("dirs.upload") != "[dirs.upload]" else "Yükle")
+        paths, _ = QFileDialog.getOpenFileNames(self, t("dirs.upload"))
         if not paths:
             return
         self._apply_local_upload(paths, self.current_dir)
 
-    def download_selected(self):
+    def download_selected(self, target_dir: Optional[str] = None):
         if not self.session or not self.session.get("files"):
             QMessageBox.warning(self, t("common.error"), t("common.no_connection"))
-            return
+            return False
         files = self.session["files"]
         tab = self.tabs.currentWidget()
         tab_key = "all"
@@ -2204,13 +2632,14 @@ class RemoteDirPanel(QWidget):
         sel = self.selected_paths(tab_key)
         if not sel:
             QMessageBox.information(self, t("common.info"), t("dirs.no_file_selected"))
-            return
-        target_dir = QFileDialog.getExistingDirectory(
-            self, t("dirs.download_selected") if t("dirs.download_selected") != "[dirs.download_selected]" else "Seçilenleri İndir"
-        )
+            return False
         if not target_dir:
-            return
-        self._apply_remote_download(sel, target_dir)
+            target_dir = QFileDialog.getExistingDirectory(
+                self, t("dirs.download_selected")
+            )
+        if not target_dir:
+            return False
+        return self._apply_remote_download(sel, target_dir)
 
     # ---------- drag/drop apply ----------
     def _apply_drag_drop(self, src_paths: List[str], dest_dir: str, *, is_copy: bool, src_panel_id: str) -> bool:

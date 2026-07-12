@@ -8,6 +8,8 @@ from truba_gui.services.files_base import FilesBackend, RemoteEntry
 from truba_gui.ssh.client import SSHClientWrapper
 
 class SSHFilesBackend(FilesBackend):
+    supports_parallel_transfers = False
+
     def __init__(self, ssh: SSHClientWrapper):
         if not ssh.sftp:
             raise RuntimeError("SFTP not available")
@@ -187,8 +189,12 @@ class SSHFilesBackend(FilesBackend):
 
     def copy(self, src_remote_path: str, dst_remote_path: str, recursive: bool = False) -> None:
         import shlex
-        s = shlex.quote(src_remote_path)
-        d = shlex.quote(dst_remote_path)
+        if recursive and self.is_dir(src_remote_path) and self.is_dir(dst_remote_path):
+            s = shlex.quote(src_remote_path.rstrip("/") + "/.")
+            d = shlex.quote(dst_remote_path.rstrip("/") + "/.")
+        else:
+            s = shlex.quote(src_remote_path)
+            d = shlex.quote(dst_remote_path)
         cmd = f"cp {'-r' if recursive else ''} {s} {d}".strip()
         code, _, err = self.ssh.run(cmd)
         if code != 0:
