@@ -8,7 +8,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QMimeData, QUrl, Qt, Signal
+from PySide6.QtCore import QPoint, QMimeData, QTimer, QUrl, Qt, Signal
 from PySide6.QtGui import QDrag, QKeyEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -41,34 +41,21 @@ from truba_gui.services.local_files import (
 from truba_gui.services.file_clipboard import get_file_clipboard
 from truba_gui.ui.widgets.remote_dir_panel import MIME_REMOTE_PATHS
 
-LOCAL_CONTEXT_MENU_KEYS = [
-    "dirs.upload",
-    "dirs.add_files_to_queue",
-    "files.open",
-    "files.open_with",
-    "dirs.open_in_new_tab",
-    "dirs.edit",
-    "dirs.create_directory",
-    "dirs.create_directory_enter",
-    "dirs.refresh",
-    "dirs.delete",
-    "dirs.rename",
-]
 LOCAL_CONTEXT_MENU_LABELS = [
-    "dirs.upload",
-    "dirs.add_files_to_queue",
+    "Upload",
+    "Add files to queue",
     "---",
-    "files.open",
-    "files.open_with",
-    "dirs.open_in_new_tab",
-    "dirs.edit",
+    "Open",
+    "Open with...",
+    "Open in new tab",
+    "Edit",
     "---",
-    "dirs.create_directory",
-    "dirs.create_directory_enter",
-    "dirs.refresh",
+    "Create directory",
+    "Create directory and enter it",
+    "Refresh",
     "---",
-    "dirs.delete",
-    "dirs.rename",
+    "Delete",
+    "Rename",
 ]
 
 _SORT_NAME_ROLE = Qt.ItemDataRole.UserRole + 10
@@ -199,26 +186,19 @@ class _LocalTree(QTreeWidget):
         except Exception:
             paths, source = [], ""
         if paths and source:
-            self.remotePathsDropped.emit(paths, source)
             event.acceptProposedAction()
+            QTimer.singleShot(
+                0,
+                lambda dropped_paths=list(paths), source_panel=source: (
+                    self.remotePathsDropped.emit(dropped_paths, source_panel)
+                ),
+            )
         else:
             event.ignore()
 
     def keyPressEvent(self, event) -> None:  # type: ignore[override]
-        if event.key() == Qt.Key.Key_Delete and event.modifiers() in (
-            Qt.KeyboardModifier.NoModifier,
-            Qt.KeyboardModifier.ControlModifier,
-        ):
-            if self._panel.delete_selected():
-                event.accept()
-                return
-        if event.key() in (
-            Qt.Key.Key_PageUp,
-            Qt.Key.Key_PageDown,
-            Qt.Key.Key_Home,
-            Qt.Key.Key_End,
-        ) and not event.modifiers():
-            self._move_current_for_key(event.key())
+        if event.key() == Qt.Key.Key_F5 and not event.modifiers():
+            self._panel.refresh()
             event.accept()
             return
         if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
@@ -238,42 +218,11 @@ class _LocalTree(QTreeWidget):
             if self._panel.rename_selected():
                 event.accept()
                 return
-        if event.key() == Qt.Key.Key_F5 and not event.modifiers():
-            self._panel.refresh()
-            event.accept()
-            return
         if event.key() == Qt.Key.Key_Delete and not event.modifiers():
             if self._panel.delete_selected():
                 event.accept()
                 return
         super().keyPressEvent(event)
-
-    def _move_current_for_key(self, key: Qt.Key) -> None:
-        count = self.topLevelItemCount()
-        if count <= 0:
-            return
-        current = self.currentItem()
-        current_index = self.indexOfTopLevelItem(current) if current is not None else -1
-        if current_index < 0:
-            current_index = 0
-        if key == Qt.Key.Key_Home:
-            target_index = 0
-        elif key == Qt.Key.Key_End:
-            target_index = count - 1
-        else:
-            row_height = self.sizeHintForRow(max(0, current_index))
-            if row_height <= 0:
-                row_height = max(1, self.fontMetrics().height())
-            page_rows = max(1, self.viewport().height() // row_height - 1)
-            delta = -page_rows if key == Qt.Key.Key_PageUp else page_rows
-            target_index = max(0, min(count - 1, current_index + delta))
-        target = self.topLevelItem(target_index)
-        if target is None:
-            return
-        self.clearSelection()
-        target.setSelected(True)
-        self.setCurrentItem(target)
-        self.scrollToItem(target)
 
 
 class LocalDirPanel(QWidget):
@@ -310,12 +259,10 @@ class LocalDirPanel(QWidget):
         controls.addWidget(self.btn_refresh)
 
         self.tabs = QTabWidget()
-        self.tabs.setTabsClosable(True)
         self.tree = self._make_tree()
         self._tab_dirs[self.tree] = self.current_dir
         self.tabs.addTab(self.tree, self._tab_label(self.current_dir))
         self.tabs.currentChanged.connect(self._on_tab_changed)
-        self.tabs.tabCloseRequested.connect(self._close_tab)
 
         layout = QVBoxLayout(self)
         layout.addWidget(self.title_label)
@@ -350,19 +297,6 @@ class LocalDirPanel(QWidget):
             self.current_dir = self._tab_dirs.get(widget, self.current_dir)
             self.path.setText(self.current_dir)
             self.refresh()
-
-    def _close_tab(self, index: int) -> None:
-        if self.tabs.count() <= 1 or index < 0:
-            return
-        widget = self.tabs.widget(index)
-        if isinstance(widget, _LocalTree):
-            self._tab_dirs.pop(widget, None)
-        was_current = index == self.tabs.currentIndex()
-        self.tabs.removeTab(index)
-        if widget is not None:
-            widget.deleteLater()
-        if was_current:
-            self._on_tab_changed(self.tabs.currentIndex())
 
     def open_directory_in_new_tab(self, directory: str) -> bool:
         target = os.path.abspath(os.path.expanduser(directory or ""))
@@ -505,29 +439,6 @@ class LocalDirPanel(QWidget):
             self._add_entry(entry.name, entry.path, entry.is_dir, entry.size, entry.mtime)
         self.tree.apply_sort()
 
-    def _refresh_open_directories(self, directories: set[str]) -> None:
-        targets = {
-            os.path.abspath(os.path.expanduser(directory))
-            for directory in directories
-            if directory
-        }
-        if not targets:
-            return
-        active_tree = self.tree
-        active_dir = self.current_dir
-        active_path_text = self.path.text()
-        for tree, directory in list(self._tab_dirs.items()):
-            normalized = os.path.abspath(os.path.expanduser(directory))
-            if normalized not in targets:
-                continue
-            self.tree = tree
-            self.current_dir = normalized
-            self.path.setText(normalized)
-            self.refresh()
-        self.tree = active_tree
-        self.current_dir = active_dir
-        self.path.setText(active_path_text)
-
     def selected_paths(self) -> list[str]:
         return [
             str(item.data(0, Qt.ItemDataRole.UserRole))
@@ -585,7 +496,6 @@ class LocalDirPanel(QWidget):
             return False
 
         changed = False
-        affected_dirs = {str(target_dir)}
         for source_text in paths:
             source = Path(source_text)
             if not source.exists():
@@ -596,7 +506,6 @@ class LocalDirPanel(QWidget):
             try:
                 if op == "move":
                     shutil.move(str(source), str(destination))
-                    affected_dirs.add(str(source.parent))
                 elif source.is_dir():
                     shutil.copytree(source, destination)
                 else:
@@ -608,7 +517,7 @@ class LocalDirPanel(QWidget):
         if changed:
             if op == "move":
                 self._local_clipboard = None
-            self._refresh_open_directories(affected_dirs)
+            self.refresh()
         return changed
 
     def open_selected_in_file_explorer(self) -> bool:
@@ -630,8 +539,8 @@ class LocalDirPanel(QWidget):
     def create_directory(self, *, enter: bool = False) -> bool:
         name, ok = QInputDialog.getText(
             self,
-            t("dirs.new_folder"),
-            t("dirs.new_folder_label"),
+            t("dirs.new_folder") if t("dirs.new_folder") != "[dirs.new_folder]" else "Yeni Klasör",
+            t("dirs.new_folder_label") if t("dirs.new_folder_label") != "[dirs.new_folder_label]" else "Klasör adı:",
         )
         if not ok or not name.strip():
             return False
@@ -674,22 +583,22 @@ class LocalDirPanel(QWidget):
         one_is_dir = one_selected and Path(paths[0]).is_dir()
 
         menu = QMenu(self)
-        act_upload = menu.addAction(t(LOCAL_CONTEXT_MENU_KEYS[0]))
-        act_add_queue = menu.addAction(t(LOCAL_CONTEXT_MENU_KEYS[1]))
+        act_upload = menu.addAction(LOCAL_CONTEXT_MENU_LABELS[0])
+        act_add_queue = menu.addAction(LOCAL_CONTEXT_MENU_LABELS[1])
         act_add_queue.setEnabled(False)
         menu.addSeparator()
-        act_open = menu.addAction(t(LOCAL_CONTEXT_MENU_KEYS[2]))
-        act_open_with = menu.addAction(t(LOCAL_CONTEXT_MENU_KEYS[3]))
-        act_open_new_tab = menu.addAction(t(LOCAL_CONTEXT_MENU_KEYS[4]))
-        act_edit = menu.addAction(t(LOCAL_CONTEXT_MENU_KEYS[5]))
+        act_open = menu.addAction(LOCAL_CONTEXT_MENU_LABELS[3])
+        act_open_with = menu.addAction(t("files.open_with"))
+        act_open_new_tab = menu.addAction(LOCAL_CONTEXT_MENU_LABELS[5])
+        act_edit = menu.addAction(LOCAL_CONTEXT_MENU_LABELS[6])
         act_edit.setEnabled(False)
         menu.addSeparator()
-        act_create_dir = menu.addAction(t(LOCAL_CONTEXT_MENU_KEYS[6]))
-        act_create_dir_enter = menu.addAction(t(LOCAL_CONTEXT_MENU_KEYS[7]))
-        act_refresh = menu.addAction(t(LOCAL_CONTEXT_MENU_KEYS[8]))
+        act_create_dir = menu.addAction(LOCAL_CONTEXT_MENU_LABELS[8])
+        act_create_dir_enter = menu.addAction(LOCAL_CONTEXT_MENU_LABELS[9])
+        act_refresh = menu.addAction(LOCAL_CONTEXT_MENU_LABELS[10])
         menu.addSeparator()
-        act_delete = menu.addAction(t(LOCAL_CONTEXT_MENU_KEYS[9]))
-        act_rename = menu.addAction(t(LOCAL_CONTEXT_MENU_KEYS[10]))
+        act_delete = menu.addAction(LOCAL_CONTEXT_MENU_LABELS[12])
+        act_rename = menu.addAction(LOCAL_CONTEXT_MENU_LABELS[13])
 
         act_upload.setEnabled(bool(paths))
         act_open.setEnabled(not paths or one_selected)
@@ -744,7 +653,7 @@ class LocalDirPanel(QWidget):
         old = Path(str(selected[0].data(0, Qt.ItemDataRole.UserRole)))
         new_name, ok = QInputDialog.getText(
             self,
-            t("dirs.rename"),
+            t("dirs.rename") if t("dirs.rename") != "[dirs.rename]" else "Yeniden Adlandır",
             t("dirs.rename_label"),
             text=old.name,
         )

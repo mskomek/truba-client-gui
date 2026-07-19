@@ -5,16 +5,17 @@ import re
 import shlex
 
 from PySide6.QtCore import QThreadPool, QTimer, Signal, Qt
-from PySide6.QtGui import QFontDatabase, QFontMetrics, QTextCursor
+from PySide6.QtGui import QFontDatabase, QTextCursor
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QPushButton, QTextEdit,
-    QLineEdit, QLabel, QMessageBox, QTabBar, QTabWidget, QMainWindow
+    QLineEdit, QLabel, QMessageBox, QMainWindow, QTabBar, QTabWidget
 )
 
 from truba_gui.config.storage import (
     SBATCH_FOLLOW_MODE_NEW_TABS_SPLIT,
     SBATCH_FOLLOW_MODE_NEW_WINDOW_COMBINED,
     SBATCH_FOLLOW_MODE_NEW_WINDOWS_SPLIT,
+    SBATCH_FOLLOW_MODE_NONE,
     SBATCH_FOLLOW_MODE_OUTPUTS_TAB,
     get_jobs_outputs_refresh_interval_seconds,
     get_lssrv_auto_refresh_enabled,
@@ -45,17 +46,6 @@ _LIVE_TAIL_INTERVAL_MS = 1000
 _LIVE_TAIL_LINE_COUNT = 200
 
 
-def _apply_terminal_output_style(widget: QTextEdit) -> None:
-    font = QFontDatabase.systemFont(QFontDatabase.FixedFont)
-    widget.setLineWrapMode(QTextEdit.NoWrap)
-    widget.setFont(font)
-    widget.setTabStopDistance(QFontMetrics(font).horizontalAdvance(" ") * 8)
-    widget.setStyleSheet(
-        "QTextEdit { background-color: #111111; color: #e8e8e8; "
-        "border: 1px solid #555; selection-background-color: #264f78; }"
-    )
-
-
 class _NavigableTextEdit(QTextEdit):
     def keyPressEvent(self, event) -> None:  # type: ignore[override]
         if (
@@ -71,231 +61,6 @@ class _NavigableTextEdit(QTextEdit):
             event.accept()
             return
         super().keyPressEvent(event)
-
-
-class _OutputFollowerWidget(QWidget):
-    def __init__(self):
-        super().__init__()
-        self.session = None
-        self.active_out = ""
-        self.active_err = ""
-        self._async_workers: set[AsyncCall] = set()
-        self._async_busy: dict[str, int] = {}
-        self._session_generation = 0
-
-        layout = QVBoxLayout(self)
-        self.lbl_script = QLabel(t("jobs_outputs.no_script"))
-        layout.addWidget(self.lbl_script)
-
-        self.out_box = QGroupBox(t("jobs_outputs.output_stdout"))
-        out_layout = QVBoxLayout(self.out_box)
-        self.path_out = QLineEdit()
-        self.path_out.returnPressed.connect(lambda: self._apply_path_edit(0))
-        self.path_out.editingFinished.connect(lambda: self._apply_path_edit(0))
-        self.search_out = QLineEdit()
-        self.search_out.setPlaceholderText(t("jobs_outputs.search_placeholder"))
-        self.btn_search_out = QPushButton(t("jobs_outputs.search_next"))
-        self.search_out.returnPressed.connect(lambda: self._find_in_output(0))
-        self.btn_search_out.clicked.connect(lambda: self._find_in_output(0))
-        out_search = QHBoxLayout()
-        out_search.addWidget(self.search_out)
-        out_search.addWidget(self.btn_search_out)
-        self.txt_out = _NavigableTextEdit()
-        self.txt_out.setReadOnly(True)
-        _apply_terminal_output_style(self.txt_out)
-        out_layout.addWidget(self.path_out)
-        out_layout.addLayout(out_search)
-        out_layout.addWidget(self.txt_out)
-
-        self.err_box = QGroupBox(t("jobs_outputs.output_stderr"))
-        err_layout = QVBoxLayout(self.err_box)
-        self.path_err = QLineEdit()
-        self.path_err.returnPressed.connect(lambda: self._apply_path_edit(1))
-        self.path_err.editingFinished.connect(lambda: self._apply_path_edit(1))
-        self.search_err = QLineEdit()
-        self.search_err.setPlaceholderText(t("jobs_outputs.search_placeholder"))
-        self.btn_search_err = QPushButton(t("jobs_outputs.search_next"))
-        self.search_err.returnPressed.connect(lambda: self._find_in_output(1))
-        self.btn_search_err.clicked.connect(lambda: self._find_in_output(1))
-        err_search = QHBoxLayout()
-        err_search.addWidget(self.search_err)
-        err_search.addWidget(self.btn_search_err)
-        self.txt_err = _NavigableTextEdit()
-        self.txt_err.setReadOnly(True)
-        _apply_terminal_output_style(self.txt_err)
-        err_layout.addWidget(self.path_err)
-        err_layout.addLayout(err_search)
-        err_layout.addWidget(self.txt_err)
-
-        layout.addWidget(self.out_box)
-        layout.addWidget(self.err_box)
-
-        self._live_timer = QTimer(self)
-        self._live_timer.setInterval(_LIVE_TAIL_INTERVAL_MS)
-        self._live_timer.timeout.connect(self._poll_live)
-
-    def set_single_file_mode(self, remote_path: str) -> None:
-        self.lbl_script.setVisible(False)
-        self.out_box.setTitle(t("jobs_outputs.file_follow_title"))
-        self.err_box.setVisible(False)
-        self.open_in_output_slot(0, remote_path)
-
-    def set_single_output_mode(self, slot: int, remote_path: str) -> None:
-        self.lbl_script.setVisible(False)
-        if slot == 0:
-            self.out_box.setVisible(True)
-            self.err_box.setVisible(False)
-        else:
-            self.out_box.setVisible(False)
-            self.err_box.setVisible(True)
-        self.open_in_output_slot(slot, remote_path)
-
-    def set_session(self, session) -> None:
-        self._session_generation += 1
-        self._async_busy.clear()
-        self.session = session
-
-    def shutdown(self) -> None:
-        self._live_timer.stop()
-        self._session_generation += 1
-        self._async_busy.clear()
-
-    def _start_async(self, key: str, fn, on_success) -> bool:
-        if key in self._async_busy:
-            return False
-        generation = self._session_generation
-        token = (key, generation)
-        worker = AsyncCall(token, fn)
-        self._async_busy[key] = generation
-        self._async_workers.add(worker)
-
-        def finished(current_token, result) -> None:
-            self._async_workers.discard(worker)
-            if self._async_busy.get(key) == generation:
-                self._async_busy.pop(key, None)
-            if current_token != (key, self._session_generation):
-                return
-            on_success(result)
-
-        def failed(current_token, _exc) -> None:
-            self._async_workers.discard(worker)
-            if self._async_busy.get(key) == generation:
-                self._async_busy.pop(key, None)
-
-        worker.signals.finished.connect(finished)
-        worker.signals.failed.connect(failed)
-        QThreadPool.globalInstance().start(worker)
-        return True
-
-    def open_in_output_slot(self, slot: int, remote_path: str) -> None:
-        if slot == 0:
-            self.active_out = remote_path
-            self.path_out.setText(remote_path)
-            self.txt_out.setPlainText("")
-        else:
-            self.active_err = remote_path
-            self.path_err.setText(remote_path)
-            self.txt_err.setPlainText("")
-        self._live_timer.start()
-        self._poll_live()
-
-    def _apply_path_edit(self, slot: int) -> None:
-        path_edit = self.path_out if slot == 0 else self.path_err
-        remote_path = path_edit.text().strip()
-        current_path = self.active_out if slot == 0 else self.active_err
-        if remote_path == current_path:
-            return
-        if not remote_path:
-            if slot == 0:
-                self.active_out = ""
-                self.txt_out.setPlainText("")
-            else:
-                self.active_err = ""
-                self.txt_err.setPlainText("")
-            if not self.active_out and not self.active_err:
-                self._live_timer.stop()
-            return
-        self.open_in_output_slot(slot, remote_path)
-
-    def _find_in_output(self, slot: int) -> None:
-        search = self.search_out if slot == 0 else self.search_err
-        output = self.txt_out if slot == 0 else self.txt_err
-        query = search.text()
-        if not query:
-            return
-        if output.find(query):
-            return
-        cursor = output.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.Start)
-        output.setTextCursor(cursor)
-        output.find(query)
-
-    def _poll_live(self) -> None:
-        if not self.session:
-            self._live_timer.stop()
-            return
-        files = self.session.get("files")
-        ssh = self.session.get("ssh")
-        if not files:
-            self._live_timer.stop()
-            return
-        paths = (self.active_out, self.active_err)
-        if not any(paths):
-            self._live_timer.stop()
-            return
-
-        def fetch() -> list[tuple[int, str, str, str]]:
-            results = []
-            for slot, path in enumerate(paths):
-                if not path:
-                    continue
-                try:
-                    if ssh:
-                        code, out, err = ssh.run(
-                            f"tail -n {_LIVE_TAIL_LINE_COUNT} -- {shlex.quote(path)}",
-                            log_output=False,
-                        )
-                        if code == 0:
-                            results.append((slot, path, out, ""))
-                            continue
-                        raise RuntimeError(err.strip() or f"exit={code}")
-                    text = files.read_text(path)
-                    lines = text.splitlines()[-_LIVE_TAIL_LINE_COUNT:]
-                    tail = "\n".join(lines) + ("\n" if lines else "")
-                    results.append((slot, path, tail, ""))
-                except Exception as exc:
-                    results.append((slot, path, "", str(exc)))
-            return results
-
-        def success(results) -> None:
-            for slot, path, text, error in results:
-                current_path = self.active_out if slot == 0 else self.active_err
-                if path != current_path:
-                    continue
-                widget = self.txt_out if slot == 0 else self.txt_err
-                follow_latest = JobsOutputsWidget._is_scrolled_to_bottom(widget)
-                if error:
-                    kind_key = (
-                        "jobs_outputs.output_kind"
-                        if slot == 0
-                        else "jobs_outputs.error_kind"
-                    )
-                    JobsOutputsWidget._set_live_text(
-                        widget,
-                        t("jobs_outputs.waiting_for_file_unknown").format(
-                            kind=t(kind_key),
-                            error=error,
-                        ),
-                        follow_latest=follow_latest,
-                    )
-                else:
-                    JobsOutputsWidget._set_live_text(
-                        widget,
-                        text,
-                        follow_latest=follow_latest,
-                    )
-
-        self._start_async("tail", fetch, success)
 
 
 def _ansi_to_html(text: str) -> str:
@@ -347,6 +112,220 @@ def _ansi_to_html(text: str) -> str:
     )
 
 
+class _OutputFollowerWidget(QWidget):
+    """Lightweight two-slot live follower used by temporary windows and tabs."""
+
+    def __init__(self):
+        super().__init__()
+        self.session = None
+        self.active_out = ""
+        self.active_err = ""
+        self._async_workers: set[AsyncCall] = set()
+        self._async_busy: dict[str, int] = {}
+        self._session_generation = 0
+
+        layout = QVBoxLayout(self)
+        self.lbl_script = QLabel(t("jobs_outputs.no_script"))
+        layout.addWidget(self.lbl_script)
+
+        self.out_box = QGroupBox(t("jobs_outputs.output_stdout"))
+        out_layout = QVBoxLayout(self.out_box)
+        self.path_out = QLineEdit()
+        self.path_out.returnPressed.connect(lambda: self._follow_path_from_field(0))
+        self.search_out = QLineEdit()
+        self.search_out.setPlaceholderText(t("jobs_outputs.search_placeholder"))
+        self.btn_search_out = QPushButton(t("jobs_outputs.search_next"))
+        self.search_out.returnPressed.connect(lambda: self._find_in_output(0))
+        self.btn_search_out.clicked.connect(lambda: self._find_in_output(0))
+        out_search = QHBoxLayout()
+        out_search.addWidget(self.search_out)
+        out_search.addWidget(self.btn_search_out)
+        self.txt_out = _NavigableTextEdit()
+        self.txt_out.setReadOnly(True)
+        out_layout.addWidget(self.path_out)
+        out_layout.addLayout(out_search)
+        out_layout.addWidget(self.txt_out)
+
+        self.err_box = QGroupBox(t("jobs_outputs.output_stderr"))
+        err_layout = QVBoxLayout(self.err_box)
+        self.path_err = QLineEdit()
+        self.path_err.returnPressed.connect(lambda: self._follow_path_from_field(1))
+        self.search_err = QLineEdit()
+        self.search_err.setPlaceholderText(t("jobs_outputs.search_placeholder"))
+        self.btn_search_err = QPushButton(t("jobs_outputs.search_next"))
+        self.search_err.returnPressed.connect(lambda: self._find_in_output(1))
+        self.btn_search_err.clicked.connect(lambda: self._find_in_output(1))
+        err_search = QHBoxLayout()
+        err_search.addWidget(self.search_err)
+        err_search.addWidget(self.btn_search_err)
+        self.txt_err = _NavigableTextEdit()
+        self.txt_err.setReadOnly(True)
+        err_layout.addWidget(self.path_err)
+        err_layout.addLayout(err_search)
+        err_layout.addWidget(self.txt_err)
+
+        layout.addWidget(self.out_box)
+        layout.addWidget(self.err_box)
+        JobsOutputsWidget._apply_terminal_output_style(self.txt_out)
+        JobsOutputsWidget._apply_terminal_output_style(self.txt_err)
+
+        self._live_timer = QTimer(self)
+        self._live_timer.setInterval(_LIVE_TAIL_INTERVAL_MS)
+        self._live_timer.timeout.connect(self._poll_live)
+
+    def set_session(self, session) -> None:
+        self._session_generation += 1
+        self._async_busy.clear()
+        self.session = session
+        if session and session.get("connected") and (self.active_out or self.active_err):
+            self._live_timer.start()
+            self._poll_live()
+        else:
+            self._live_timer.stop()
+
+    def shutdown(self) -> None:
+        self._live_timer.stop()
+        self._session_generation += 1
+        self._async_busy.clear()
+
+    def open_in_output_slot(self, slot: int, remote_path: str) -> None:
+        if not remote_path or slot not in (0, 1):
+            return
+        if slot == 0:
+            self.active_out = remote_path
+            self.path_out.setText(remote_path)
+            self.txt_out.clear()
+        else:
+            self.active_err = remote_path
+            self.path_err.setText(remote_path)
+            self.txt_err.clear()
+        # A follower opened with one slot must keep the empty counterpart
+        # available for later assignment from the Files context menu.
+        self.out_box.show()
+        self.err_box.show()
+        if self.session and self.session.get("connected"):
+            self._live_timer.start()
+            self._poll_live()
+
+    def _follow_path_from_field(self, slot: int) -> None:
+        field = self.path_out if slot == 0 else self.path_err
+        remote_path = field.text().strip()
+        if not remote_path:
+            field.setText(self.active_out if slot == 0 else self.active_err)
+            return
+        self.open_in_output_slot(slot, remote_path)
+
+    def _find_in_output(self, slot: int) -> None:
+        search = self.search_out if slot == 0 else self.search_err
+        output = self.txt_out if slot == 0 else self.txt_err
+        query = search.text()
+        if not query or output.find(query):
+            return
+        cursor = output.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.Start)
+        output.setTextCursor(cursor)
+        output.find(query)
+
+    def _start_async(self, key: str, fn, on_success) -> bool:
+        if key in self._async_busy:
+            return False
+        generation = self._session_generation
+        token = (key, generation)
+        worker = AsyncCall(token, fn)
+        self._async_busy[key] = generation
+        self._async_workers.add(worker)
+
+        def finished(current_token, result) -> None:
+            self._async_workers.discard(worker)
+            if self._async_busy.get(key) == generation:
+                self._async_busy.pop(key, None)
+            if current_token == (key, self._session_generation):
+                on_success(result)
+
+        def failed(_current_token, _exc) -> None:
+            self._async_workers.discard(worker)
+            if self._async_busy.get(key) == generation:
+                self._async_busy.pop(key, None)
+
+        worker.signals.finished.connect(finished)
+        worker.signals.failed.connect(failed)
+        QThreadPool.globalInstance().start(worker)
+        return True
+
+    def _poll_live(self) -> None:
+        if not self.session or not self.session.get("connected"):
+            self._live_timer.stop()
+            return
+        files = self.session.get("files")
+        ssh = self.session.get("ssh")
+        paths = (self.active_out, self.active_err)
+        if not files or not any(paths):
+            self._live_timer.stop()
+            return
+
+        def fetch() -> list[tuple[int, str, str, str]]:
+            results = []
+            for slot, path in enumerate(paths):
+                if not path:
+                    continue
+                try:
+                    if ssh:
+                        code, out, err = ssh.run(
+                            f"tail -n {_LIVE_TAIL_LINE_COUNT} -- {shlex.quote(path)}",
+                            log_output=False,
+                        )
+                        if code != 0:
+                            raise RuntimeError(err.strip() or f"exit={code}")
+                        text = out
+                    else:
+                        all_text = files.read_text(path)
+                        lines = all_text.splitlines()[-_LIVE_TAIL_LINE_COUNT:]
+                        text = "\n".join(lines) + ("\n" if lines else "")
+                    results.append((slot, path, text, ""))
+                except Exception as exc:
+                    results.append((slot, path, "", str(exc)))
+            return results
+
+        def success(results) -> None:
+            for slot, path, text, error in results:
+                current_path = self.active_out if slot == 0 else self.active_err
+                if path != current_path:
+                    continue
+                output = self.txt_out if slot == 0 else self.txt_err
+                follow_latest = JobsOutputsWidget._is_scrolled_to_bottom(output)
+                if error:
+                    kind_key = (
+                        "jobs_outputs.output_kind"
+                        if slot == 0
+                        else "jobs_outputs.error_kind"
+                    )
+                    text = t("jobs_outputs.waiting_for_file_unknown").format(
+                        kind=t(kind_key),
+                        error=error,
+                    )
+                JobsOutputsWidget._set_live_text(
+                    output,
+                    text,
+                    follow_latest=follow_latest,
+                )
+
+        self._start_async("tail", fetch, success)
+
+
+class _SingleFileFollowerWidget(_OutputFollowerWidget):
+    """Dedicated one-file follower used by the generic new-window action."""
+
+    def __init__(self, remote_path: str):
+        super().__init__()
+        # This is the address bar shown in the standalone "Follow: file"
+        # window. Keep its editable contract explicit even if the shared
+        # two-slot follower changes later.
+        self.path_out.setReadOnly(False)
+        self.open_in_output_slot(0, remote_path)
+        self.err_box.hide()
+        self.out_box.setTitle(remote_path.rstrip("/").rsplit("/", 1)[-1] or remote_path)
+
+
 class JobsOutputsWidget(QWidget):
     request_show_directories = Signal()
     polling_visibility_changed = Signal()
@@ -365,6 +344,7 @@ class JobsOutputsWidget(QWidget):
         self._async_busy: dict[str, int] = {}
         self._session_generation = 0
         self._follow_windows: list[QMainWindow] = []
+        self._single_file_follow_windows: list[QMainWindow] = []
         self._follow_tabs: list[_OutputFollowerWidget] = []
         self._follow_tab_target_ids: dict[_OutputFollowerWidget, str] = {}
         self._follow_targets: dict[str, _OutputFollowerWidget] = {}
@@ -379,17 +359,17 @@ class JobsOutputsWidget(QWidget):
         self.outputs_tab = QWidget(self.section_tabs)
 
         # --- Jobs box
-        self.jobs_box = QGroupBox(t("jobs.title"))
+        self.jobs_box = QGroupBox(t("jobs.title") if t("jobs.title") != "[jobs.title]" else "İşler")
         self.jobs_text = QTextEdit()
         self.jobs_text.setReadOnly(True)
-        _apply_terminal_output_style(self.jobs_text)
+        self._apply_terminal_output_style(self.jobs_text)
 
-        self.btn_refresh = QPushButton(t("jobs.refresh"))
+        self.btn_refresh = QPushButton(t("jobs.refresh") if t("jobs.refresh") != "[jobs.refresh]" else "Yenile")
         self.btn_refresh.clicked.connect(self.refresh_jobs)
 
         self.cancel_id = QLineEdit()
         self.cancel_id.setPlaceholderText(t("jobs.job_id"))
-        self.btn_cancel = QPushButton(t("jobs.cancel"))
+        self.btn_cancel = QPushButton(t("jobs.cancel") if t("jobs.cancel") != "[jobs.cancel]" else "İşi İptal Et")
         self.btn_cancel.clicked.connect(self.cancel_job)
 
         row = QHBoxLayout()
@@ -407,7 +387,7 @@ class JobsOutputsWidget(QWidget):
         self.meta_text = QTextEdit()
         self.meta_text.setReadOnly(True)
         self.meta_text.setPlaceholderText(t("jobs_outputs.accounting_placeholder"))
-        _apply_terminal_output_style(self.meta_text)
+        self._apply_terminal_output_style(self.meta_text)
         self.meta_job_id = QLineEdit()
         self.meta_job_id.setPlaceholderText(t("jobs.job_id"))
         self.btn_sacct = QPushButton(t("jobs_outputs.refresh_sacct"))
@@ -429,7 +409,7 @@ class JobsOutputsWidget(QWidget):
         self.btn_lssrv.clicked.connect(self.refresh_lssrv)
         self.lssrv_text = QTextEdit()
         self.lssrv_text.setReadOnly(True)
-        _apply_terminal_output_style(self.lssrv_text)
+        self._apply_terminal_output_style(self.lssrv_text)
         lssrv_layout = QVBoxLayout(self.lssrv_box)
         lssrv_row = QHBoxLayout()
         lssrv_row.addWidget(self.btn_lssrv)
@@ -439,7 +419,7 @@ class JobsOutputsWidget(QWidget):
 
         # --- Scratch panel (Files subtab)
         self.scratch_panel = RemoteDirPanel(
-            title=t("jobs_outputs.scratch_title")
+            title=t("jobs_outputs.scratch_title") if t("jobs_outputs.scratch_title") != "[jobs_outputs.scratch_title]" else "Scratch"
         )
         self.scratch_panel.open_file.connect(self.load_one_file)  # double click
         self.scratch_panel.enable_output_menu = True
@@ -471,11 +451,11 @@ class JobsOutputsWidget(QWidget):
         files_layout.addWidget(self.scratch_panel)
 
         # --- Outputs group (2 panels)
-        self.out_group = QGroupBox(t("jobs_outputs.outputs_title"))
+        self.out_group = QGroupBox(t("jobs_outputs.outputs_title") if t("jobs_outputs.outputs_title") != "[jobs_outputs.outputs_title]" else "Çıktılar")
         outputs_layout = QVBoxLayout(self.outputs_tab)
         vg = QVBoxLayout(self.out_group)
 
-        self.lbl_script = QLabel(t("jobs_outputs.no_script"))
+        self.lbl_script = QLabel(t("jobs_outputs.no_script") if t("jobs_outputs.no_script") != "[jobs_outputs.no_script]" else "Aktif Slurm Script: (yok)")
         vg.addWidget(self.lbl_script)
         self.btn_tail_pause = QPushButton()
         self.btn_tail_pause.clicked.connect(self._toggle_tail_pause)
@@ -489,8 +469,7 @@ class JobsOutputsWidget(QWidget):
         self.out_box = QGroupBox(t("jobs_outputs.output_stdout"))
         v1 = QVBoxLayout(self.out_box)
         self.path_out = QLineEdit()
-        self.path_out.returnPressed.connect(lambda: self._apply_output_path_edit(0))
-        self.path_out.editingFinished.connect(lambda: self._apply_output_path_edit(0))
+        self.path_out.returnPressed.connect(lambda: self._follow_path_from_field(0))
         self.search_out = QLineEdit()
         self.btn_search_out = QPushButton()
         self.search_out.returnPressed.connect(lambda: self._find_in_output(0))
@@ -500,7 +479,6 @@ class JobsOutputsWidget(QWidget):
         search_out_row.addWidget(self.btn_search_out)
         self.txt_out = _NavigableTextEdit()
         self.txt_out.setReadOnly(True)
-        _apply_terminal_output_style(self.txt_out)
         v1.addWidget(self.path_out)
         v1.addLayout(search_out_row)
         v1.addWidget(self.txt_out)
@@ -509,8 +487,7 @@ class JobsOutputsWidget(QWidget):
         self.err_box = QGroupBox(t("jobs_outputs.output_stderr"))
         v2 = QVBoxLayout(self.err_box)
         self.path_err = QLineEdit()
-        self.path_err.returnPressed.connect(lambda: self._apply_output_path_edit(1))
-        self.path_err.editingFinished.connect(lambda: self._apply_output_path_edit(1))
+        self.path_err.returnPressed.connect(lambda: self._follow_path_from_field(1))
         self.search_err = QLineEdit()
         self.btn_search_err = QPushButton()
         self.search_err.returnPressed.connect(lambda: self._find_in_output(1))
@@ -520,7 +497,6 @@ class JobsOutputsWidget(QWidget):
         search_err_row.addWidget(self.btn_search_err)
         self.txt_err = _NavigableTextEdit()
         self.txt_err.setReadOnly(True)
-        _apply_terminal_output_style(self.txt_err)
         v2.addWidget(self.path_err)
         v2.addLayout(search_err_row)
         v2.addWidget(self.txt_err)
@@ -559,6 +535,15 @@ class JobsOutputsWidget(QWidget):
         )
         self.retranslate_ui()
 
+    @staticmethod
+    def _apply_terminal_output_style(widget: QTextEdit) -> None:
+        widget.setLineWrapMode(QTextEdit.NoWrap)
+        widget.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
+        widget.setStyleSheet(
+            "QTextEdit { background-color: #111111; color: #e8e8e8; "
+            "border: 1px solid #555; selection-background-color: #264f78; }"
+        )
+
     def set_session(self, session):
         self._session_generation += 1
         self._async_busy.clear()
@@ -580,6 +565,12 @@ class JobsOutputsWidget(QWidget):
         self._live_timer.stop()
         self._jobs_refresh_timer.stop()
         self.apply_refresh_settings()
+        for follower in list(self._follow_targets.values()):
+            follower.set_session(session)
+        for window in list(self._single_file_follow_windows):
+            follower = window.centralWidget()
+            if isinstance(follower, _SingleFileFollowerWidget):
+                follower.set_session(session)
 
         if not session or not session.get("connected"):
             return
@@ -651,21 +642,20 @@ class JobsOutputsWidget(QWidget):
                 self._live_timer.stop()
             if hasattr(self, "_jobs_refresh_timer") and self._jobs_refresh_timer:
                 self._jobs_refresh_timer.stop()
-            for widget in list(getattr(self, "_follow_tabs", [])):
-                try:
-                    widget.shutdown()
-                except Exception:
-                    pass
-            for window in list(getattr(self, "_follow_windows", [])):
-                try:
-                    child = window.centralWidget()
-                    if hasattr(child, "shutdown"):
-                        child.shutdown()
-                    window.close()
-                except Exception:
-                    pass
             self._session_generation += 1
             self._async_busy.clear()
+            for follower in list(self._follow_tabs):
+                follower.shutdown()
+            for window in list(self._follow_windows):
+                follower = window.centralWidget()
+                if isinstance(follower, _OutputFollowerWidget):
+                    follower.shutdown()
+                window.close()
+            for window in list(self._single_file_follow_windows):
+                follower = window.centralWidget()
+                if isinstance(follower, _SingleFileFollowerWidget):
+                    follower.shutdown()
+                window.close()
         except Exception:
             pass
 
@@ -857,10 +847,7 @@ class JobsOutputsWidget(QWidget):
                 switch_to_outputs=switch_to_outputs,
                 follow_mode=follow_mode,
             )
-            if (
-                switch_to_outputs
-                and follow_mode == SBATCH_FOLLOW_MODE_OUTPUTS_TAB
-            ):
+            if switch_to_outputs and follow_mode == SBATCH_FOLLOW_MODE_OUTPUTS_TAB:
                 self.section_tabs.setCurrentWidget(self.outputs_tab)
 
     # ---------------- File open behaviors
@@ -877,55 +864,12 @@ class JobsOutputsWidget(QWidget):
         else:
             self.open_in_output_slot(0, remote_path)
 
-    def open_in_output_slot(
-        self,
-        slot: int,
-        remote_path: str,
-        *,
-        switch_to_outputs: bool = True,
-    ):
-        """
-        Sağ tuş menüsü: seçili dosyayı Output-1 (slot=0) veya Output-2 (slot=1) izle.
-        """
-        if slot == 0:
-            self.active_out = remote_path
-            self.path_out.setText(remote_path)
-            self._last_sig[0] = None
-            self.txt_out.setPlainText("")
-        else:
-            self.active_err = remote_path
-            self.path_err.setText(remote_path)
-            self._last_sig[1] = None
-            self.txt_err.setPlainText("")
-        if switch_to_outputs:
-            self.section_tabs.setCurrentWidget(self.outputs_tab)
-        self._sync_polling(immediate=True)
-        append_event({"type": "open_watch", "slot": slot+1, "path": remote_path})
-
-    def _apply_output_path_edit(self, slot: int) -> None:
-        path_edit = self.path_out if slot == 0 else self.path_err
-        remote_path = path_edit.text().strip()
-        current_path = self.active_out if slot == 0 else self.active_err
-        if remote_path == current_path:
-            return
-        if not remote_path:
-            if slot == 0:
-                self.active_out = ""
-                self._last_sig[0] = None
-                self.txt_out.setPlainText("")
-            else:
-                self.active_err = ""
-                self._last_sig[1] = None
-                self.txt_err.setPlainText("")
-            self._sync_polling(immediate=False)
-            return
-        self.open_in_output_slot(slot, remote_path)
-
     def _output_target_choices(self) -> list[tuple[str, str]]:
         return [
             (target_id, self._follow_target_labels[target_id])
             for target_id in self._follow_target_order
             if target_id in self._follow_targets
+            and target_id in self._follow_target_labels
         ]
 
     def _register_output_target(
@@ -956,18 +900,17 @@ class JobsOutputsWidget(QWidget):
     def _close_follow_tab(self, index: int) -> None:
         if index < 3:
             return
-        widget = self.section_tabs.widget(index)
-        if not isinstance(widget, _OutputFollowerWidget):
+        follower = self.section_tabs.widget(index)
+        if not isinstance(follower, _OutputFollowerWidget):
             return
-        target_id = self._follow_tab_target_ids.pop(widget, None)
+        target_id = self._follow_tab_target_ids.pop(follower, "")
         if target_id:
             self._unregister_output_target(target_id)
-        if widget in self._follow_tabs:
-            self._follow_tabs.remove(widget)
-        widget.shutdown()
+        if follower in self._follow_tabs:
+            self._follow_tabs.remove(follower)
+        follower.shutdown()
         self.section_tabs.removeTab(index)
-        widget.deleteLater()
-        append_event({"type": "close_watch_tab", "target": target_id or ""})
+        follower.deleteLater()
 
     def open_in_existing_follower(
         self,
@@ -975,194 +918,169 @@ class JobsOutputsWidget(QWidget):
         slot: int,
         remote_path: str,
     ) -> None:
-        if not remote_path:
-            return
         follower = self._follow_targets.get(target_id)
         if follower is None:
-            self._unregister_output_target(target_id)
             return
         follower.open_in_output_slot(slot, remote_path)
-        append_event(
-            {
-                "type": "open_watch_existing_target",
-                "target": self._follow_target_labels.get(target_id, target_id),
-                "slot": slot + 1,
-                "path": remote_path,
-            }
-        )
 
-    def _make_output_follower(self, slot: int, remote_path: str) -> _OutputFollowerWidget:
-        follower = _OutputFollowerWidget()
-        follower.set_session(self.session)
-        follower.open_in_output_slot(slot, remote_path)
-        return follower
-
-    def _make_single_output_follower(
+    def _make_output_follower(
         self,
         slot: int,
         remote_path: str,
     ) -> _OutputFollowerWidget:
         follower = _OutputFollowerWidget()
         follower.set_session(self.session)
-        follower.set_single_output_mode(slot, remote_path)
+        follower.open_in_output_slot(slot, remote_path)
         return follower
 
     def _make_output_pair_follower(
         self,
-        out_path: str,
-        err_path: str,
-        script_path: str = "",
+        output_path: str,
+        error_path: str,
     ) -> _OutputFollowerWidget:
         follower = _OutputFollowerWidget()
         follower.set_session(self.session)
-        if script_path:
-            follower.lbl_script.setText(
-                t("jobs_outputs.active_script").format(path=script_path)
-            )
-        if out_path:
-            follower.open_in_output_slot(0, out_path)
-        if err_path:
-            follower.open_in_output_slot(1, err_path)
+        if output_path:
+            follower.open_in_output_slot(0, output_path)
+        if error_path:
+            follower.open_in_output_slot(1, error_path)
         return follower
 
-    def _make_file_follower(self, remote_path: str) -> _OutputFollowerWidget:
-        follower = _OutputFollowerWidget()
-        follower.set_session(self.session)
-        follower.set_single_file_mode(remote_path)
-        return follower
+    def _show_follower_window(
+        self,
+        follower: _OutputFollowerWidget,
+        *,
+        title: str = "",
+    ) -> QMainWindow:
+        target_id, label = self._register_output_target("window", follower)
+        window = QMainWindow(None, Qt.WindowType.Window)
+        window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        window.setWindowTitle(title or label)
+        window.setCentralWidget(follower)
+        window.resize(900, 650)
+        self._follow_windows.append(window)
+
+        def cleanup(*_args) -> None:
+            follower.shutdown()
+            self._unregister_output_target(target_id)
+            if window in self._follow_windows:
+                self._follow_windows.remove(window)
+
+        window.destroyed.connect(cleanup)
+        window.show()
+        return window
 
     def open_in_output_window(self, slot: int, remote_path: str) -> None:
-        if not remote_path:
+        if slot not in (0, 1) or not remote_path:
             return
-        follower = self._make_single_output_follower(slot, remote_path)
-        target_id, target_label = self._register_output_target("window", follower)
-        window = QMainWindow()
-        window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
-        window.setWindowFlag(Qt.WindowType.Window, True)
-        window.setCentralWidget(follower)
-        window.setWindowTitle(
-            f"{target_label} - {t('jobs_outputs.outputs_title')} - {remote_path}"
-        )
-        window.resize(980, 760)
-        window.destroyed.connect(
-            lambda _obj=None, current=window, tid=target_id: (
-                self._follow_windows.remove(current)
-                if current in self._follow_windows
-                else None,
-                self._unregister_output_target(tid),
-            )
-        )
-        self._follow_windows.append(window)
-        window.show()
-        append_event(
-            {
-                "type": "open_watch_window",
-                "slot": slot + 1,
-                "path": remote_path,
-            }
-        )
+        self._show_follower_window(self._make_output_follower(slot, remote_path))
 
-    def open_file_follow_window(self, remote_path: str) -> None:
+    def open_file_follow_window(self, remote_path: str) -> QMainWindow | None:
         if not remote_path:
             return
-        follower = self._make_file_follower(remote_path)
-        window = QMainWindow()
+        follower = _SingleFileFollowerWidget(remote_path)
+        follower.set_session(self.session)
+        filename = remote_path.rstrip("/").rsplit("/", 1)[-1] or remote_path
+        window = QMainWindow(None, Qt.WindowType.Window)
         window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
-        window.setWindowFlag(Qt.WindowType.Window, True)
-        window.setCentralWidget(follower)
         window.setWindowTitle(
-            f"{t('jobs_outputs.file_follow_title')} - {remote_path}"
+            t("jobs_outputs.single_follow_window_title").format(name=filename)
         )
-        window.resize(900, 620)
-        window.destroyed.connect(
-            lambda _obj=None, current=window: self._follow_windows.remove(current)
-            if current in self._follow_windows
-            else None
-        )
-        self._follow_windows.append(window)
+        window.setCentralWidget(follower)
+        window.resize(900, 650)
+        self._single_file_follow_windows.append(window)
+
+        def cleanup(*_args) -> None:
+            follower.shutdown()
+            if window in self._single_file_follow_windows:
+                self._single_file_follow_windows.remove(window)
+
+        window.destroyed.connect(cleanup)
         window.show()
-        append_event({"type": "open_file_watch_window", "path": remote_path})
+        return window
 
     def open_output_pair_window(
         self,
-        out_path: str,
-        err_path: str,
-        script_path: str = "",
+        output_path: str,
+        error_path: str,
     ) -> None:
-        if not out_path and not err_path:
+        if not output_path and not error_path:
             return
-        follower = self._make_output_pair_follower(out_path, err_path, script_path)
-        target_id, target_label = self._register_output_target("window", follower)
-        window = QMainWindow()
-        window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
-        window.setWindowFlag(Qt.WindowType.Window, True)
-        window.setCentralWidget(follower)
-        window.setWindowTitle(
-            f"{target_label} - {t('jobs_outputs.outputs_title')}"
-        )
-        window.resize(980, 760)
-        window.destroyed.connect(
-            lambda _obj=None, current=window, tid=target_id: (
-                self._follow_windows.remove(current)
-                if current in self._follow_windows
-                else None,
-                self._unregister_output_target(tid),
-            )
-        )
-        self._follow_windows.append(window)
-        window.show()
-        append_event(
-            {
-                "type": "open_watch_pair_window",
-                "out": out_path,
-                "err": err_path,
-            }
+        output_name = output_path.rstrip("/").rsplit("/", 1)[-1] if output_path else "-"
+        error_name = error_path.rstrip("/").rsplit("/", 1)[-1] if error_path else "-"
+        follower = self._make_output_pair_follower(output_path, error_path)
+        # This is the automatic combined sbatch window, not the explicit
+        # Output 1/Output 2 window action.  Its visible panels describe the
+        # file roles directly rather than exposing reusable slot terminology.
+        follower.out_box.setTitle(t("jobs_outputs.output"))
+        follower.err_box.setTitle(t("common.error"))
+        self._show_follower_window(
+            follower,
+            title=t("jobs_outputs.combined_follow_window_title").format(
+                output=output_name,
+                error=error_name,
+            ),
         )
 
-    def open_in_output_tab(self, slot: int, remote_path: str) -> None:
-        if not remote_path:
-            return
-        follower = self._make_output_follower(slot, remote_path)
-        target_id, target_label = self._register_output_target("tab", follower)
+    def _append_follower_tab(
+        self,
+        follower: _OutputFollowerWidget,
+    ) -> int:
+        target_id, label = self._register_output_target("tab", follower)
         self._follow_tabs.append(follower)
         self._follow_tab_target_ids[follower] = target_id
-        index = self.section_tabs.addTab(
-            follower,
-            f"{target_label} - {t('jobs_outputs.outputs_new_tab').format(slot=slot + 1)}",
-        )
+        index = self.section_tabs.addTab(follower, label)
         self.section_tabs.setCurrentIndex(index)
-        append_event(
-            {
-                "type": "open_watch_tab",
-                "slot": slot + 1,
-                "path": remote_path,
-            }
-        )
+        return index
+
+    def open_in_output_tab(self, slot: int, remote_path: str) -> None:
+        if slot not in (0, 1) or not remote_path:
+            return
+        self._append_follower_tab(self._make_output_follower(slot, remote_path))
 
     def open_output_pair_tab(
         self,
-        out_path: str,
-        err_path: str,
-        script_path: str = "",
+        output_path: str,
+        error_path: str,
     ) -> None:
-        if not out_path and not err_path:
+        if not output_path and not error_path:
             return
-        follower = self._make_output_pair_follower(out_path, err_path, script_path)
-        target_id, target_label = self._register_output_target("tab", follower)
-        self._follow_tabs.append(follower)
-        self._follow_tab_target_ids[follower] = target_id
-        index = self.section_tabs.addTab(
-            follower,
-            f"{target_label} - {t('jobs_outputs.outputs_title')}",
+        self._append_follower_tab(
+            self._make_output_pair_follower(output_path, error_path)
         )
-        self.section_tabs.setCurrentIndex(index)
-        append_event(
-            {
-                "type": "open_watch_pair_tab",
-                "out": out_path,
-                "err": err_path,
-            }
-        )
+
+    def open_in_output_slot(
+        self,
+        slot: int,
+        remote_path: str,
+        *,
+        switch_to_outputs: bool = True,
+    ):
+        """
+        Sağ tuş menüsü: seçili dosyayı Output-1 (slot=0) veya Output-2 (slot=1) izle.
+        """
+        if slot == 0:
+            self.active_out = remote_path
+            self.path_out.setText(remote_path)
+            self._last_sig[0] = None
+            self.txt_out.setPlainText("")
+        else:
+            self.active_err = remote_path
+            self.path_err.setText(remote_path)
+            self._last_sig[1] = None
+            self.txt_err.setPlainText("")
+        if switch_to_outputs:
+            self.section_tabs.setCurrentWidget(self.outputs_tab)
+        self._sync_polling(immediate=True)
+        append_event({"type": "open_watch", "slot": slot+1, "path": remote_path})
+
+    def _follow_path_from_field(self, slot: int) -> None:
+        field = self.path_out if slot == 0 else self.path_err
+        remote_path = field.text().strip()
+        if not remote_path:
+            field.setText(self.active_out if slot == 0 else self.active_err)
+            return
+        self.open_in_output_slot(slot, remote_path)
 
     def _activate_slurm_script(
         self,
@@ -1192,15 +1110,15 @@ class JobsOutputsWidget(QWidget):
         err_path = resolve_path(script_path, err_raw, jobid, job_name) if err_raw else ""
 
         if follow_mode == SBATCH_FOLLOW_MODE_NEW_WINDOW_COMBINED:
-            self.open_output_pair_window(out_path, err_path, script_path)
+            self.open_output_pair_window(out_path, err_path)
         elif follow_mode == SBATCH_FOLLOW_MODE_NEW_WINDOWS_SPLIT:
             if out_path:
-                self.open_in_output_window(0, out_path)
+                self.open_file_follow_window(out_path)
             if err_path:
-                self.open_in_output_window(1, err_path)
+                self.open_file_follow_window(err_path)
         elif follow_mode == SBATCH_FOLLOW_MODE_NEW_TABS_SPLIT:
-            self.open_output_pair_tab(out_path, err_path, script_path)
-        else:
+            self.open_output_pair_tab(out_path, err_path)
+        elif follow_mode == SBATCH_FOLLOW_MODE_OUTPUTS_TAB:
             if out_path:
                 self.open_in_output_slot(
                     0,
@@ -1213,11 +1131,15 @@ class JobsOutputsWidget(QWidget):
                     err_path,
                     switch_to_outputs=switch_to_outputs,
                 )
-
-        if switch_to_outputs and follow_mode == SBATCH_FOLLOW_MODE_OUTPUTS_TAB:
-            self.section_tabs.setCurrentWidget(self.outputs_tab)
-        if follow_mode == SBATCH_FOLLOW_MODE_OUTPUTS_TAB:
+            if switch_to_outputs:
+                self.section_tabs.setCurrentWidget(self.outputs_tab)
             self._poll_live()
+        elif follow_mode != SBATCH_FOLLOW_MODE_NONE:
+            # A corrupt persisted value is harmless: retain the familiar view.
+            if out_path:
+                self.open_in_output_slot(0, out_path, switch_to_outputs=switch_to_outputs)
+            if err_path:
+                self.open_in_output_slot(1, err_path, switch_to_outputs=switch_to_outputs)
         append_event({"type": "activate_slurm", "script": script_path, "out": out_path, "err": err_path})
 
     # ---------------- Live polling
@@ -1279,9 +1201,10 @@ class JobsOutputsWidget(QWidget):
     @staticmethod
     def _scroll_to_latest(
         widget: QTextEdit,
-        *,
         horizontal_position: int | None = None,
     ) -> None:
+        if horizontal_position is None:
+            horizontal_position = widget.horizontalScrollBar().value()
         cursor = widget.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
         widget.setTextCursor(cursor)
@@ -1290,11 +1213,10 @@ class JobsOutputsWidget(QWidget):
         def finish_scroll() -> None:
             scrollbar = widget.verticalScrollBar()
             scrollbar.setValue(scrollbar.maximum())
-            if horizontal_position is not None:
-                horizontal = widget.horizontalScrollBar()
-                horizontal.setValue(
-                    min(horizontal_position, horizontal.maximum())
-                )
+            horizontal_scrollbar = widget.horizontalScrollBar()
+            horizontal_scrollbar.setValue(
+                min(horizontal_position, horizontal_scrollbar.maximum())
+            )
 
         finish_scroll()
         QTimer.singleShot(0, finish_scroll)
@@ -1312,9 +1234,9 @@ class JobsOutputsWidget(QWidget):
         follow_latest: bool,
     ) -> None:
         scrollbar = widget.verticalScrollBar()
-        horizontal = widget.horizontalScrollBar()
+        horizontal_scrollbar = widget.horizontalScrollBar()
         previous_position = scrollbar.value()
-        previous_horizontal_position = horizontal.value()
+        previous_horizontal_position = horizontal_scrollbar.value()
         widget.setPlainText(text)
         if follow_latest:
             JobsOutputsWidget._scroll_to_latest(
@@ -1323,8 +1245,8 @@ class JobsOutputsWidget(QWidget):
             )
         else:
             scrollbar.setValue(min(previous_position, scrollbar.maximum()))
-            horizontal.setValue(
-                min(previous_horizontal_position, horizontal.maximum())
+            horizontal_scrollbar.setValue(
+                min(previous_horizontal_position, horizontal_scrollbar.maximum())
             )
 
     def _poll_live(self):
@@ -1404,19 +1326,19 @@ class JobsOutputsWidget(QWidget):
     def retranslate_ui(self):
         details_title = f"{t('jobs.title')} / {t('common.details')}"
         files_title = t("jobs_outputs.files_title")
-        outputs_title = t("jobs_outputs.outputs_title")
+        outputs_title = t("jobs_outputs.outputs_title") if t("jobs_outputs.outputs_title") != "[jobs_outputs.outputs_title]" else "Çıktılar"
         self.section_tabs.setTabText(0, details_title)
         self.section_tabs.setTabText(1, files_title)
         self.section_tabs.setTabText(2, outputs_title)
-        self.jobs_box.setTitle(t("jobs.title"))
+        self.jobs_box.setTitle(t("jobs.title") if t("jobs.title") != "[jobs.title]" else "İşler")
         self.meta_box.setTitle(t("jobs_outputs.accounting_details"))
         self.lssrv_box.setTitle(t("jobs_outputs.lssrv_title"))
         self.out_group.setTitle(outputs_title)
         self.out_box.setTitle(t("jobs_outputs.output_stdout"))
         self.err_box.setTitle(t("jobs_outputs.output_stderr"))
-        self.lbl_script.setText(t("jobs_outputs.no_script"))
-        self.btn_refresh.setText(t("jobs.refresh"))
-        self.btn_cancel.setText(t("jobs.cancel"))
+        self.lbl_script.setText(t("jobs_outputs.no_script") if t("jobs_outputs.no_script") != "[jobs_outputs.no_script]" else "Aktif Slurm Script: (yok)")
+        self.btn_refresh.setText(t("jobs.refresh") if t("jobs.refresh") != "[jobs.refresh]" else "Yenile")
+        self.btn_cancel.setText(t("jobs.cancel") if t("jobs.cancel") != "[jobs.cancel]" else "İşi İptal Et")
         self.cancel_id.setPlaceholderText(t("jobs.job_id"))
         self.meta_job_id.setPlaceholderText(t("jobs.job_id"))
         self.meta_text.setPlaceholderText(t("jobs_outputs.accounting_placeholder"))

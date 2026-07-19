@@ -8,18 +8,28 @@ from truba_gui.services.files_base import FilesBackend, RemoteEntry
 from truba_gui.ssh.client import SSHClientWrapper
 
 class SSHFilesBackend(FilesBackend):
-    supports_parallel_transfers = False
-
     def __init__(self, ssh: SSHClientWrapper):
         if not ssh.sftp:
             raise RuntimeError("SFTP not available")
         self.ssh = ssh
+        # Construction happens in the connection worker.  Cache the channel
+        # capability here so opening a transfer controller never performs an
+        # SSH round trip on the Qt GUI thread.
+        capability_probe = getattr(ssh, "supports_transfer_sftp_channels", None)
+        self._supports_parallel_transfers = bool(
+            capability_probe()
+        ) if callable(capability_probe) else False
 
         # Edge-case notes (for maintainers):
         # - NFS "stale file handle" can occur after scratch purge; operations may fail
         #   even if paths look valid.
         # - Quota can be exceeded even when `df -h` looks fine (home/scratch policies).
         # - Permission issues can be subtle (directory has r/w but missing execute bit).
+
+    @property
+    def supports_parallel_transfers(self) -> bool:
+        """Whether this connection can create an SFTP channel per transfer."""
+        return self._supports_parallel_transfers
 
     def listdir(self, remote_dir: str) -> List[str]:
         return self.ssh.sftp.listdir(remote_dir)
@@ -60,47 +70,56 @@ class SSHFilesBackend(FilesBackend):
         - If sizes match, do nothing.
         - Otherwise, overwrite.
         """
-        remote_size, _ = self.stat(remote_path)
-        local_size = 0
+        sftp = self.ssh.open_transfer_sftp()
         try:
-            local_size = os.path.getsize(local_path)
-        except Exception:
+            remote_size = int(getattr(sftp.stat(remote_path), "st_size", 0) or 0)
             local_size = 0
+            try:
+                local_size = os.path.getsize(local_path)
+            except Exception:
+                local_size = 0
 
-        if local_size == remote_size and remote_size > 0:
-            if progress_cb is not None:
-                progress_cb(remote_size, remote_size)
-            return
+            if local_size == remote_size and remote_size > 0:
+                if progress_cb is not None:
+                    progress_cb(remote_size, remote_size)
+                return
 
-        # Resume only when local is a strict prefix of remote.
-        if 0 < local_size < remote_size:
-            with self.ssh.sftp.open(remote_path, "rb") as rf:
-                rf.seek(local_size)
-                os.makedirs(os.path.dirname(local_path) or ".", exist_ok=True)
-                with open(local_path, "ab") as lf:
+            # Resume only when local is a strict prefix of remote.
+            if 0 < local_size < remote_size:
+                if progress_cb is not None:
+                    progress_cb(local_size, remote_size)
+                with sftp.open(remote_path, "rb") as rf:
+                    rf.seek(local_size)
+                    os.makedirs(os.path.dirname(local_path) or ".", exist_ok=True)
+                    with open(local_path, "ab") as lf:
+                        while True:
+                            chunk = rf.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            lf.write(chunk)
+                            local_size += len(chunk)
+                            if progress_cb is not None:
+                                progress_cb(local_size, remote_size)
+                return
+
+            # Overwrite
+            os.makedirs(os.path.dirname(local_path) or ".", exist_ok=True)
+            downloaded = 0
+            with sftp.open(remote_path, "rb") as rf:
+                with open(local_path, "wb") as lf:
                     while True:
                         chunk = rf.read(1024 * 1024)
                         if not chunk:
                             break
                         lf.write(chunk)
-                        local_size += len(chunk)
+                        downloaded += len(chunk)
                         if progress_cb is not None:
-                            progress_cb(local_size, remote_size)
-            return
-
-        # Overwrite
-        os.makedirs(os.path.dirname(local_path) or ".", exist_ok=True)
-        downloaded = 0
-        with self.ssh.sftp.open(remote_path, "rb") as rf:
-            with open(local_path, "wb") as lf:
-                while True:
-                    chunk = rf.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    lf.write(chunk)
-                    downloaded += len(chunk)
-                    if progress_cb is not None:
-                        progress_cb(downloaded, remote_size)
+                            progress_cb(downloaded, remote_size)
+        finally:
+            try:
+                sftp.close()
+            except Exception:
+                pass
 
     def upload(self, local_path: str, remote_path: str, progress_cb=None) -> None:
         """Upload a local file.
@@ -110,46 +129,54 @@ class SSHFilesBackend(FilesBackend):
         - If sizes match, do nothing.
         - Otherwise, overwrite.
         """
-        local_size = os.path.getsize(local_path)
-        remote_size = 0
+        sftp = self.ssh.open_transfer_sftp()
         try:
-            remote_size, _ = self.stat(remote_path)
-        except Exception:
+            local_size = os.path.getsize(local_path)
             remote_size = 0
+            try:
+                remote_size = int(getattr(sftp.stat(remote_path), "st_size", 0) or 0)
+            except Exception:
+                remote_size = 0
 
-        if remote_size == local_size and local_size > 0:
-            if progress_cb is not None:
-                progress_cb(local_size, local_size)
-            return
+            if remote_size == local_size and local_size > 0:
+                if progress_cb is not None:
+                    progress_cb(local_size, local_size)
+                return
 
-        # Resume only when remote is a strict prefix of local.
-        if 0 < remote_size < local_size:
+            # Resume only when remote is a strict prefix of local.
+            if 0 < remote_size < local_size:
+                if progress_cb is not None:
+                    progress_cb(remote_size, local_size)
+                with open(local_path, "rb") as lf:
+                    lf.seek(remote_size)
+                    with sftp.open(remote_path, "ab") as rf:
+                        while True:
+                            chunk = lf.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            rf.write(chunk)
+                            remote_size += len(chunk)
+                            if progress_cb is not None:
+                                progress_cb(remote_size, local_size)
+                return
+
+            # Overwrite
+            sent = 0
             with open(local_path, "rb") as lf:
-                lf.seek(remote_size)
-                # append to remote file
-                with self.ssh.sftp.open(remote_path, "ab") as rf:
+                with sftp.open(remote_path, "wb") as rf:
                     while True:
                         chunk = lf.read(1024 * 1024)
                         if not chunk:
                             break
                         rf.write(chunk)
-                        remote_size += len(chunk)
+                        sent += len(chunk)
                         if progress_cb is not None:
-                            progress_cb(remote_size, local_size)
-            return
-
-        # Overwrite
-        sent = 0
-        with open(local_path, "rb") as lf:
-            with self.ssh.sftp.open(remote_path, "wb") as rf:
-                while True:
-                    chunk = lf.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    rf.write(chunk)
-                    sent += len(chunk)
-                    if progress_cb is not None:
-                        progress_cb(sent, local_size)
+                            progress_cb(sent, local_size)
+        finally:
+            try:
+                sftp.close()
+            except Exception:
+                pass
 
     def remove(self, remote_path: str, recursive: bool = False) -> None:
         # Use shell rm to support recursive deletes reliably.
@@ -172,6 +199,17 @@ class SSHFilesBackend(FilesBackend):
         if code != 0:
             raise RuntimeError(err.strip() or f"mkdir failed (exit={code})")
 
+    def chmod(self, remote_path: str, mode: int) -> None:
+        try:
+            self.ssh.sftp.chmod(remote_path, mode)
+            return
+        except Exception:
+            pass
+        import shlex
+        q = shlex.quote(remote_path)
+        code, _, err = self.ssh.run(f"chmod {mode:03o} {q}")
+        if code != 0:
+            raise RuntimeError(err.strip() or f"chmod failed (exit={code})")
 
     def exists(self, remote_path: str) -> bool:
         try:
@@ -189,12 +227,8 @@ class SSHFilesBackend(FilesBackend):
 
     def copy(self, src_remote_path: str, dst_remote_path: str, recursive: bool = False) -> None:
         import shlex
-        if recursive and self.is_dir(src_remote_path) and self.is_dir(dst_remote_path):
-            s = shlex.quote(src_remote_path.rstrip("/") + "/.")
-            d = shlex.quote(dst_remote_path.rstrip("/") + "/.")
-        else:
-            s = shlex.quote(src_remote_path)
-            d = shlex.quote(dst_remote_path)
+        s = shlex.quote(src_remote_path)
+        d = shlex.quote(dst_remote_path)
         cmd = f"cp {'-r' if recursive else ''} {s} {d}".strip()
         code, _, err = self.ssh.run(cmd)
         if code != 0:

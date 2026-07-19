@@ -42,6 +42,10 @@ class MockFilesBackend(FilesBackend):
             "/arf/home/user",
         }
         self._mt: Dict[str, int] = {k: now for k in [*self._dirs, *self._files]}
+        self._mode: Dict[str, int] = {
+            **{k: stat.S_IFDIR | 0o755 for k in self._dirs},
+            **{k: stat.S_IFREG | 0o644 for k in self._files},
+        }
 
     def _touch(self, path: str) -> None:
         self._mt[_norm(path)] = int(time.time())
@@ -82,7 +86,7 @@ class MockFilesBackend(FilesBackend):
         for name in self.listdir(remote_dir):
             full = _norm(posixpath.join(remote_dir, name))
             is_dir = full in self._dirs
-            mode = stat.S_IFDIR if is_dir else stat.S_IFREG
+            mode = self._mode.get(full, (stat.S_IFDIR if is_dir else stat.S_IFREG) | (0o755 if is_dir else 0o644))
             size = 0 if is_dir else len(self._files.get(full, b""))
             entries.append(RemoteEntry(name=name, path=full, is_dir=is_dir, size=size, mtime=self._mt.get(full, 0), mode=mode))
         entries.sort(key=lambda e: (not e.is_dir, e.name.lower()))
@@ -98,6 +102,7 @@ class MockFilesBackend(FilesBackend):
         remote_path = _norm(remote_path)
         self._ensure_parent_dirs(remote_path)
         self._files[remote_path] = text.encode("utf-8")
+        self._mode[remote_path] = stat.S_IFREG | 0o644
         self._touch(remote_path)
 
     def stat(self, remote_path: str) -> Tuple[int,int]:
@@ -122,6 +127,7 @@ class MockFilesBackend(FilesBackend):
         remote_path = _norm(remote_path)
         self._ensure_parent_dirs(remote_path)
         self._files[remote_path] = Path(local_path).read_bytes()
+        self._mode[remote_path] = stat.S_IFREG | 0o644
         self._touch(remote_path)
 
     def exists(self, remote_path: str) -> bool:
@@ -135,6 +141,7 @@ class MockFilesBackend(FilesBackend):
         remote_dir = _norm(remote_dir)
         self._ensure_parent_dirs(remote_dir)
         self._dirs.add(remote_dir)
+        self._mode[remote_dir] = stat.S_IFDIR | 0o755
         self._touch(remote_dir)
 
     def remove(self, remote_path: str, recursive: bool = False) -> None:
@@ -142,6 +149,7 @@ class MockFilesBackend(FilesBackend):
         if remote_path in self._files:
             del self._files[remote_path]
             self._mt.pop(remote_path, None)
+            self._mode.pop(remote_path, None)
             return
         if remote_path not in self._dirs:
             raise FileNotFoundError(remote_path)
@@ -155,9 +163,11 @@ class MockFilesBackend(FilesBackend):
             self._files.pop(path, None)
             self._dirs.discard(path)
             self._mt.pop(path, None)
+            self._mode.pop(path, None)
         if remote_path != "/":
             self._dirs.discard(remote_path)
             self._mt.pop(remote_path, None)
+            self._mode.pop(remote_path, None)
 
     def rename(self, remote_path: str, new_remote_path: str) -> None:
         self.move(remote_path, new_remote_path)
@@ -168,6 +178,7 @@ class MockFilesBackend(FilesBackend):
         if src in self._files:
             self._ensure_parent_dirs(dst)
             self._files[dst] = bytes(self._files[src])
+            self._mode[dst] = stat.S_IFREG | stat.S_IMODE(self._mode.get(src, stat.S_IFREG | 0o644))
             self._touch(dst)
             return
         if src not in self._dirs:
@@ -186,6 +197,7 @@ class MockFilesBackend(FilesBackend):
             else:
                 self._ensure_parent_dirs(target)
                 self._files[target] = bytes(self._files[path])
+                self._mode[target] = stat.S_IFREG | stat.S_IMODE(self._mode.get(path, stat.S_IFREG | 0o644))
                 self._touch(target)
 
     def move(self, src_remote_path: str, dst_remote_path: str) -> None:
@@ -195,3 +207,11 @@ class MockFilesBackend(FilesBackend):
             raise FileNotFoundError(src)
         self.copy(src, dst, recursive=True)
         self.remove(src, recursive=True)
+
+    def chmod(self, remote_path: str, mode: int) -> None:
+        remote_path = _norm(remote_path)
+        if remote_path not in self._files and remote_path not in self._dirs:
+            raise FileNotFoundError(remote_path)
+        file_type = stat.S_IFDIR if remote_path in self._dirs else stat.S_IFREG
+        self._mode[remote_path] = file_type | stat.S_IMODE(mode)
+        self._touch(remote_path)

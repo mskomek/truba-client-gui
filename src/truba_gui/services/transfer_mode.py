@@ -106,11 +106,16 @@ def upload_with_mode(
     requested: str,
     progress_cb=None,
 ) -> str:
-    data = Path(local_path).read_bytes()
-    effective = resolve_transfer_mode(local_path, requested, data[:8192])
+    with open(local_path, "rb") as source:
+        sample = source.read(8192)
+    effective = resolve_transfer_mode(local_path, requested, sample)
     if effective == BINARY:
         _upload_file(files, local_path, remote_path, progress_cb=progress_cb)
         return effective
+    # ASCII conversion intentionally materializes the source so its line endings
+    # can be normalized before the backend upload. Binary transfers stream the
+    # original path and never load the full file merely for classification.
+    data = Path(local_path).read_bytes()
     converted = _ascii_bytes_for_remote(data)
     temp_path = ""
     try:

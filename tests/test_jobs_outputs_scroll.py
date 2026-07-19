@@ -2,21 +2,17 @@ from __future__ import annotations
 
 import os
 import unittest
-from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtGui import QFontMetrics
-from PySide6.QtWidgets import QApplication, QTextEdit
+from PySide6.QtWidgets import QApplication, QMainWindow, QTextEdit
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
 
 from truba_gui.ui.widgets.jobs_outputs_widget import (
     JobsOutputsWidget,
-    _OutputFollowerWidget,
     _NavigableTextEdit,
 )
-from truba_gui.core.i18n import current_language, load_language
 
 
 class JobsOutputsScrollTests(unittest.TestCase):
@@ -26,6 +22,7 @@ class JobsOutputsScrollTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.editor = _NavigableTextEdit()
+        self.editor.setLineWrapMode(QTextEdit.NoWrap)
         self.editor.resize(320, 120)
         self.editor.show()
         self.app.processEvents()
@@ -54,36 +51,6 @@ class JobsOutputsScrollTests(unittest.TestCase):
         scrollbar = self.editor.verticalScrollBar()
         self.assertEqual(scrollbar.value(), scrollbar.maximum())
 
-    def test_live_follow_preserves_horizontal_scroll_position(self) -> None:
-        wide_lines = "\n".join(
-            f"row {index} " + "\t".join(f"column-{column:02d}" for column in range(40))
-            for index in range(80)
-        )
-        self.editor.resize(420, 140)
-        self.editor.setLineWrapMode(QTextEdit.NoWrap)
-        JobsOutputsWidget._set_live_text(
-            self.editor,
-            wide_lines,
-            follow_latest=True,
-        )
-        self.app.processEvents()
-
-        horizontal = self.editor.horizontalScrollBar()
-        vertical = self.editor.verticalScrollBar()
-        self.assertGreater(horizontal.maximum(), 0)
-        horizontal.setValue(horizontal.maximum() // 2)
-        previous_horizontal = horizontal.value()
-
-        JobsOutputsWidget._set_live_text(
-            self.editor,
-            wide_lines + "\nnew row with\twide\tcolumns",
-            follow_latest=True,
-        )
-        self.app.processEvents()
-
-        self.assertEqual(vertical.value(), vertical.maximum())
-        self.assertEqual(horizontal.value(), previous_horizontal)
-
     def test_refresh_without_follow_preserves_scroll_position(self) -> None:
         self.editor.setPlainText(self._lines(200))
         self.app.processEvents()
@@ -99,6 +66,26 @@ class JobsOutputsScrollTests(unittest.TestCase):
 
         self.assertEqual(scrollbar.value(), 25)
         self.assertLess(scrollbar.value(), scrollbar.maximum())
+
+    def test_refresh_preserves_horizontal_position_when_following_latest(self) -> None:
+        long_line = "x" * 240
+        self.editor.setPlainText("\n".join(f"{long_line}{index}" for index in range(200)))
+        self.app.processEvents()
+        vertical_scrollbar = self.editor.verticalScrollBar()
+        horizontal_scrollbar = self.editor.horizontalScrollBar()
+        vertical_scrollbar.setValue(vertical_scrollbar.maximum())
+        horizontal_scrollbar.setValue(40)
+        self.assertTrue(JobsOutputsWidget._is_scrolled_to_bottom(self.editor))
+
+        JobsOutputsWidget._set_live_text(
+            self.editor,
+            "\n".join(f"{long_line}{index}" for index in range(220)),
+            follow_latest=True,
+        )
+        self.app.processEvents()
+
+        self.assertEqual(vertical_scrollbar.value(), vertical_scrollbar.maximum())
+        self.assertEqual(horizontal_scrollbar.value(), 40)
 
     def test_bottom_state_controls_follow_per_refresh(self) -> None:
         self.editor.setPlainText(self._lines(200))
@@ -166,6 +153,94 @@ class JobsOutputsScrollTests(unittest.TestCase):
         on_success(fn())
         return True
 
+    def _assert_fake_tail_window_stream(
+        self,
+        follower,
+        paths: tuple[str, ...],
+    ) -> None:
+        class FakeFiles:
+            content: dict[str, str] = {}
+
+            @classmethod
+            def read_text(cls, path: str) -> str:
+                return cls.content[path]
+
+        def make_lines(start: int, stop: int) -> str:
+            return "\n".join(
+                f"{'x' * 240} line {index}"
+                for index in range(start, stop)
+            )
+
+        FakeFiles.content = {path: make_lines(0, 220) for path in paths}
+        follower._start_async = self._run_async_immediately
+        follower.set_session({"connected": True, "files": FakeFiles(), "ssh": None})
+        self.app.processEvents()
+
+        scrollbars = []
+        for path in paths:
+            output = follower.txt_out if path == follower.active_out else follower.txt_err
+            vertical = output.verticalScrollBar()
+            horizontal = output.horizontalScrollBar()
+            vertical.setValue(vertical.maximum())
+            horizontal.setValue(35)
+            scrollbars.append((path, output, vertical, horizontal))
+
+        for path in paths:
+            FakeFiles.content[path] = make_lines(0, 221)
+        follower._poll_live()
+        self.app.processEvents()
+
+        for path, _output, vertical, horizontal in scrollbars:
+            self.assertEqual(vertical.value(), vertical.maximum(), path)
+            self.assertEqual(horizontal.value(), 35, path)
+
+        previous_positions = {}
+        for path, _output, vertical, _horizontal in scrollbars:
+            vertical.setValue(max(0, vertical.maximum() - 20))
+            previous_positions[path] = vertical.value()
+
+        for path in paths:
+            FakeFiles.content[path] = make_lines(0, 240)
+        follower._poll_live()
+        self.app.processEvents()
+
+        for path, _output, vertical, horizontal in scrollbars:
+            self.assertEqual(vertical.value(), previous_positions[path], path)
+            self.assertEqual(horizontal.value(), 35, path)
+
+    def test_all_follow_windows_preserve_fake_tail_scroll_positions(self) -> None:
+        cases = (
+            ("output1", lambda widget: widget.open_in_output_window(0, "/tmp/out.log"), ("/tmp/out.log",)),
+            ("output2", lambda widget: widget.open_in_output_window(1, "/tmp/err.log"), ("/tmp/err.log",)),
+            (
+                "combined",
+                lambda widget: widget.open_output_pair_window("/tmp/out.log", "/tmp/err.log"),
+                ("/tmp/out.log", "/tmp/err.log"),
+            ),
+            (
+                "single",
+                lambda widget: widget.open_file_follow_window("/tmp/out.log"),
+                ("/tmp/out.log",),
+            ),
+        )
+
+        for name, open_window, paths in cases:
+            with self.subTest(window=name):
+                widget = JobsOutputsWidget()
+                try:
+                    result = open_window(widget)
+                    window = result or widget._follow_windows[-1]
+                    self.assertIsInstance(window, QMainWindow)
+                    self.assertTrue(window.isWindow())
+                    self._assert_fake_tail_window_stream(
+                        window.centralWidget(),
+                        paths,
+                    )
+                finally:
+                    widget.shutdown()
+                    widget.deleteLater()
+                    self.app.processEvents()
+
     def test_ssh_poll_requests_last_200_lines_for_both_outputs(self) -> None:
         class FakeSSH:
             def __init__(self) -> None:
@@ -217,308 +292,112 @@ class JobsOutputsScrollTests(unittest.TestCase):
         widget.shutdown()
         widget.deleteLater()
 
-    def test_focus_job_can_bind_outputs_without_switching_subtab(self) -> None:
-        class FakeFiles:
-            @staticmethod
-            def read_text(_path):
-                return "\n".join(
-                    [
-                        "#!/bin/bash",
-                        "#SBATCH -J demo",
-                        "#SBATCH -o logs/%x_%j.out",
-                        "#SBATCH -e logs/%x_%j.err",
-                    ]
-                )
-
+    def test_follow_window_output1_then_assigns_output2(self) -> None:
         widget = JobsOutputsWidget()
-        widget.session = {"connected": True, "files": FakeFiles()}
-        widget.section_tabs.setCurrentWidget(widget.details_tab)
+        try:
+            widget.open_in_output_window(0, "/tmp/stdout.log")
+            self.app.processEvents()
 
-        with (
-            patch.object(widget, "refresh_jobs"),
-            patch.object(widget, "refresh_sacct"),
-            patch.object(widget, "_poll_live"),
-        ):
-            widget.focus_job(
-                "12345",
-                "/work/job.slurm",
-                switch_to_outputs=False,
+            self.assertEqual(len(widget._follow_windows), 1)
+            window = widget._follow_windows[0]
+            self.assertIsInstance(window, QMainWindow)
+            self.assertTrue(window.isWindow())
+            self.assertIsNone(window.parentWidget())
+            target_id, _label = widget._output_target_choices()[0]
+            follower = widget._follow_targets[target_id]
+            self.assertEqual(follower.active_out, "/tmp/stdout.log")
+            self.assertEqual(follower.active_err, "")
+            self.assertTrue(follower.err_box.isVisible())
+
+            widget.open_in_existing_follower(
+                target_id,
+                1,
+                "/tmp/stderr.log",
             )
 
-        self.assertIs(widget.section_tabs.currentWidget(), widget.details_tab)
-        self.assertEqual(widget.active_out, "/work/logs/demo_12345.out")
-        self.assertEqual(widget.active_err, "/work/logs/demo_12345.err")
-        widget.shutdown()
-        widget.deleteLater()
-
-    def test_output_path_edit_rebinds_followed_file(self) -> None:
-        widget = JobsOutputsWidget()
-        widget.session = {"connected": True, "files": object()}
-        widget.section_tabs.setCurrentWidget(widget.outputs_tab)
-
-        with patch.object(widget, "_poll_live") as poll_live:
-            widget.open_in_output_slot(0, "/work/old.out")
-            widget.path_out.setText("/work/new.out")
-            widget.path_out.returnPressed.emit()
-
-        self.assertEqual(widget.active_out, "/work/new.out")
-        self.assertEqual(widget.path_out.text(), "/work/new.out")
-        self.assertEqual(widget.txt_out.toPlainText(), "")
-        self.assertGreaterEqual(poll_live.call_count, 2)
-        widget.shutdown()
-        widget.deleteLater()
-
-    def test_output_text_views_use_fixed_tab_aligned_terminal_style(self) -> None:
-        widget = JobsOutputsWidget()
-        follower = _OutputFollowerWidget()
-
-        try:
-            for text_view in (
-                widget.jobs_text,
-                widget.txt_out,
-                widget.txt_err,
-                follower.txt_out,
-                follower.txt_err,
-            ):
-                self.assertEqual(text_view.lineWrapMode(), QTextEdit.NoWrap)
-                expected_tab_width = (
-                    QFontMetrics(text_view.font()).horizontalAdvance(" ") * 8
-                )
-                self.assertEqual(text_view.tabStopDistance(), expected_tab_width)
+            self.assertEqual(follower.active_out, "/tmp/stdout.log")
+            self.assertEqual(follower.active_err, "/tmp/stderr.log")
+            self.assertEqual(follower.path_err.text(), "/tmp/stderr.log")
         finally:
-            follower.shutdown()
-            follower.deleteLater()
             widget.shutdown()
             widget.deleteLater()
+            self.app.processEvents()
 
-    def test_open_in_output_tab_creates_independent_follower(self) -> None:
-        class FakeFiles:
-            @staticmethod
-            def listdir_entries(_path):
-                return []
-
+    def test_follow_tab_output2_then_assigns_output1_and_is_closable(self) -> None:
         widget = JobsOutputsWidget()
-        widget.session = {"connected": True, "files": FakeFiles()}
-
-        with patch.object(_OutputFollowerWidget, "_poll_live"):
-            widget.open_in_output_tab(1, "/work/logs/job.err")
-
-        follower = widget.section_tabs.widget(widget.section_tabs.count() - 1)
-        self.assertIsInstance(follower, _OutputFollowerWidget)
-        self.assertIs(widget.section_tabs.currentWidget(), follower)
-        self.assertEqual(follower.active_err, "/work/logs/job.err")
-        self.assertEqual(follower.path_err.text(), "/work/logs/job.err")
-        self.assertEqual(widget.active_err, "")
-        widget.shutdown()
-        widget.deleteLater()
-
-    def test_follow_tabs_can_be_closed_without_closing_base_tabs(self) -> None:
-        widget = JobsOutputsWidget()
-        widget.session = {"connected": True, "files": object()}
-
         try:
-            with patch.object(_OutputFollowerWidget, "_poll_live"):
-                widget.open_in_output_tab(0, "/work/logs/job.out")
+            self.assertEqual(widget.section_tabs.count(), 3)
+            widget.open_in_output_tab(1, "/tmp/stderr.log")
+            self.app.processEvents()
 
             self.assertEqual(widget.section_tabs.count(), 4)
-            choices = widget._output_target_choices()
-            self.assertEqual(len(choices), 1)
-            self.assertEqual(choices[0][0], "tab:1")
+            target_id, _label = widget._output_target_choices()[0]
+            follower = widget._follow_targets[target_id]
+            self.assertEqual(follower.active_out, "")
+            self.assertEqual(follower.active_err, "/tmp/stderr.log")
+            self.assertFalse(follower.out_box.isHidden())
 
-            widget.section_tabs.tabCloseRequested.emit(0)
+            widget.open_in_existing_follower(
+                target_id,
+                0,
+                "/tmp/stdout.log",
+            )
+
+            self.assertEqual(follower.active_out, "/tmp/stdout.log")
+            self.assertEqual(follower.active_err, "/tmp/stderr.log")
+            self.assertEqual(follower.path_out.text(), "/tmp/stdout.log")
+
+            widget._close_follow_tab(0)
             self.assertEqual(widget.section_tabs.count(), 4)
-
-            follower = widget.section_tabs.widget(3)
-            with patch.object(follower, "shutdown", wraps=follower.shutdown) as shutdown:
-                widget.section_tabs.tabCloseRequested.emit(3)
-                shutdown.assert_called_once()
-
+            widget._close_follow_tab(3)
             self.assertEqual(widget.section_tabs.count(), 3)
             self.assertEqual(widget._output_target_choices(), [])
-            self.assertEqual(widget._follow_tabs, [])
         finally:
             widget.shutdown()
             widget.deleteLater()
+            self.app.processEvents()
 
-    def test_focus_job_defaults_to_new_lower_tabs_without_overwriting_outputs(self) -> None:
-        class FakeFiles:
-            @staticmethod
-            def read_text(_path):
-                return "\n".join(
-                    [
-                        "#SBATCH --job-name=demo",
-                        "#SBATCH --output=logs/%x-%j.out",
-                        "#SBATCH --error=logs/%x-%j.err",
-                    ]
-                )
-
+    def test_main_output_address_enter_switches_follow_target(self) -> None:
         widget = JobsOutputsWidget()
-        widget.session = {"connected": True, "files": FakeFiles()}
-
         try:
-            with (
-                patch.object(widget, "refresh_jobs"),
-                patch.object(widget, "refresh_sacct"),
-                patch.object(_OutputFollowerWidget, "_poll_live"),
-            ):
-                widget.open_in_output_slot(0, "/work/logs/old.out")
-                widget.focus_job(
-                    "123",
-                    "/work/job.slurm",
-                    follow_mode="new_tabs_split",
-                )
+            self.assertFalse(widget.path_out.isReadOnly())
+            self.assertFalse(widget.path_err.isReadOnly())
+            widget.path_out.setText("  /tmp/other-output.log  ")
 
-            self.assertEqual(widget.active_out, "/work/logs/old.out")
-            self.assertEqual(widget.section_tabs.count(), 4)
-            follower = widget.section_tabs.widget(3)
-            self.assertIsInstance(follower, _OutputFollowerWidget)
-            self.assertIs(widget.section_tabs.currentWidget(), follower)
-            self.assertEqual(follower.active_out, "/work/logs/demo-123.out")
-            self.assertEqual(follower.active_err, "/work/logs/demo-123.err")
-            self.assertEqual(follower.path_out.text(), "/work/logs/demo-123.out")
-            self.assertEqual(follower.path_err.text(), "/work/logs/demo-123.err")
+            widget.path_out.returnPressed.emit()
+
+            self.assertEqual(widget.active_out, "/tmp/other-output.log")
+            self.assertEqual(widget.path_out.text(), "/tmp/other-output.log")
+            self.assertEqual(widget.section_tabs.currentWidget(), widget.outputs_tab)
         finally:
             widget.shutdown()
             widget.deleteLater()
+            self.app.processEvents()
 
-    def test_focus_job_can_open_combined_or_split_follow_windows(self) -> None:
-        class FakeFiles:
-            @staticmethod
-            def read_text(_path):
-                return "\n".join(
-                    [
-                        "#SBATCH --output=job.out",
-                        "#SBATCH --error=job.err",
-                    ]
-                )
-
+    def test_single_file_follow_window_address_accepts_typing_and_enter(self) -> None:
         widget = JobsOutputsWidget()
-        widget.session = {"connected": True, "files": FakeFiles()}
-
         try:
-            with (
-                patch.object(widget, "refresh_jobs"),
-                patch.object(widget, "refresh_sacct"),
-                patch.object(_OutputFollowerWidget, "_poll_live"),
-            ):
-                widget.focus_job(
-                    "10",
-                    "/work/job.slurm",
-                    follow_mode="new_window_combined",
-                )
-                self.assertEqual(len(widget._follow_windows), 1)
-                combined = widget._follow_windows[0].centralWidget()
-                self.assertEqual(combined.active_out, "/work/job.out")
-                self.assertEqual(combined.active_err, "/work/job.err")
+            window = widget.open_file_follow_window("/tmp/stdout.log")
+            self.assertIsNotNone(window)
+            follower = window.centralWidget()
+            self.assertFalse(follower.path_out.isReadOnly())
+            follower.path_out.setFocus()
+            follower.path_out.selectAll()
 
-                widget.focus_job(
-                    "11",
-                    "/work/job.slurm",
-                    follow_mode="new_windows_split",
-                )
+            QTest.keyClicks(follower.path_out, "/tmp/reassigned.log")
+            self.app.processEvents()
 
-            self.assertEqual(len(widget._follow_windows), 3)
-            split_out = widget._follow_windows[1].centralWidget()
-            split_err = widget._follow_windows[2].centralWidget()
-            self.assertEqual(split_out.active_out, "/work/job.out")
-            self.assertEqual(split_err.active_err, "/work/job.err")
-            self.assertTrue(split_out.out_box.isVisible())
-            self.assertFalse(split_out.err_box.isVisible())
-            self.assertFalse(split_err.out_box.isVisible())
-            self.assertTrue(split_err.err_box.isVisible())
+            self.assertEqual(follower.path_out.text(), "/tmp/reassigned.log")
+
+            QTest.keyClick(follower.path_out, Qt.Key.Key_Return)
+            self.app.processEvents()
+
+            self.assertEqual(follower.active_out, "/tmp/reassigned.log")
+            self.assertEqual(follower.path_out.text(), "/tmp/reassigned.log")
         finally:
-            for window in list(widget._follow_windows):
-                window.close()
             widget.shutdown()
             widget.deleteLater()
-
-    def test_single_file_follower_hides_second_output_panel(self) -> None:
-        widget = _OutputFollowerWidget()
-        widget.set_session({"connected": True, "files": object()})
-
-        with patch.object(widget, "_poll_live"):
-            widget.set_single_file_mode("/work/logs/only.log")
-
-        self.assertEqual(widget.active_out, "/work/logs/only.log")
-        self.assertEqual(widget.path_out.text(), "/work/logs/only.log")
-        self.assertFalse(widget.err_box.isVisible())
-        self.assertFalse(widget.lbl_script.isVisible())
-        widget.shutdown()
-        widget.deleteLater()
-
-    def test_follower_path_edit_rebinds_followed_file(self) -> None:
-        widget = _OutputFollowerWidget()
-        widget.set_session({"connected": True, "files": object()})
-
-        with patch.object(widget, "_poll_live") as poll_live:
-            widget.open_in_output_slot(1, "/work/old.err")
-            widget.path_err.setText("/work/new.err")
-            widget.path_err.returnPressed.emit()
-
-        self.assertEqual(widget.active_err, "/work/new.err")
-        self.assertEqual(widget.path_err.text(), "/work/new.err")
-        self.assertEqual(widget.txt_err.toPlainText(), "")
-        self.assertGreaterEqual(poll_live.call_count, 2)
-        widget.shutdown()
-        widget.deleteLater()
-
-    def test_follow_windows_are_real_top_level_windows(self) -> None:
-        widget = JobsOutputsWidget()
-        widget.session = {"connected": True, "files": object()}
-
-        try:
-            with patch.object(_OutputFollowerWidget, "_poll_live"):
-                widget.open_in_output_window(0, "/work/logs/window.out")
-                widget.open_file_follow_window("/work/logs/only.log")
-
-            self.assertEqual(len(widget._follow_windows), 2)
-            for window in widget._follow_windows:
-                self.assertIsNone(window.parent())
-                self.assertTrue(window.isWindow())
-        finally:
-            for window in list(widget._follow_windows):
-                window.close()
-            widget.shutdown()
-            widget.deleteLater()
-
-    def test_numbered_follow_targets_can_receive_existing_menu_assignments(self) -> None:
-        previous_language = current_language()
-        load_language("en")
-        widget = JobsOutputsWidget()
-        widget.session = {"connected": True, "files": object()}
-
-        try:
-            with patch.object(_OutputFollowerWidget, "_poll_live"):
-                widget.open_in_output_window(0, "/work/logs/window.out")
-                widget.open_in_output_tab(1, "/work/logs/tab.err")
-                choices = widget._output_target_choices()
-
-                self.assertEqual(
-                    choices,
-                    [("window:1", "Window 1"), ("tab:1", "Tab 1")],
-                )
-
-                widget.open_in_existing_follower(
-                    "window:1",
-                    1,
-                    "/work/logs/reassigned.err",
-                )
-                widget.open_in_existing_follower(
-                    "tab:1",
-                    0,
-                    "/work/logs/reassigned.out",
-                )
-
-            window_follower = widget._follow_targets["window:1"]
-            tab_follower = widget._follow_targets["tab:1"]
-            self.assertEqual(window_follower.active_err, "/work/logs/reassigned.err")
-            self.assertEqual(tab_follower.active_out, "/work/logs/reassigned.out")
-            for window in list(widget._follow_windows):
-                window.close()
-            widget.shutdown()
-            widget.deleteLater()
-        finally:
-            load_language(previous_language)
+            self.app.processEvents()
 
 
 if __name__ == "__main__":

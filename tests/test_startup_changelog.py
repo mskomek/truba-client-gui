@@ -12,7 +12,7 @@ from truba_gui.ui.main_window import MainWindow
 
 
 class StartupChangelogTests(unittest.TestCase):
-    def test_changelog_sections_are_rendered_oldest_first(self) -> None:
+    def test_changelog_sections_are_rendered_newest_first(self) -> None:
         text = "\n".join(
             [
                 "# Changelog",
@@ -27,7 +27,7 @@ class StartupChangelogTests(unittest.TestCase):
 
         rendered = chronological_changelog(text)
 
-        self.assertLess(rendered.index("## v1.0.0"), rendered.index("## v1.1.0"))
+        self.assertLess(rendered.index("## v1.1.0"), rendered.index("## v1.0.0"))
 
     def test_startup_changelog_is_shown_once_per_version(self) -> None:
         stored_versions: list[str] = []

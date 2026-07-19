@@ -86,46 +86,6 @@ def set_jobs_outputs_refresh_interval_seconds(seconds: int) -> int:
     return value
 
 
-def get_sbatch_auto_open_outputs_enabled(default: bool = True) -> bool:
-    """Return whether sbatch submissions should switch to Jobs & Outputs."""
-    value = load_settings().get("sbatch_auto_open_outputs", default)
-    return value if isinstance(value, bool) else default
-
-
-def set_sbatch_auto_open_outputs_enabled(enabled: bool) -> bool:
-    """Persist whether sbatch submissions should switch to Jobs & Outputs."""
-    value = bool(enabled)
-    update_settings({"sbatch_auto_open_outputs": value})
-    return value
-
-
-SBATCH_FOLLOW_MODE_OUTPUTS_TAB = "outputs_tab"
-SBATCH_FOLLOW_MODE_NEW_WINDOW_COMBINED = "new_window_combined"
-SBATCH_FOLLOW_MODE_NEW_WINDOWS_SPLIT = "new_windows_split"
-SBATCH_FOLLOW_MODE_NEW_TABS_SPLIT = "new_tabs_split"
-SBATCH_FOLLOW_MODES = {
-    SBATCH_FOLLOW_MODE_OUTPUTS_TAB,
-    SBATCH_FOLLOW_MODE_NEW_WINDOW_COMBINED,
-    SBATCH_FOLLOW_MODE_NEW_WINDOWS_SPLIT,
-    SBATCH_FOLLOW_MODE_NEW_TABS_SPLIT,
-}
-
-
-def get_sbatch_follow_mode(default: str = SBATCH_FOLLOW_MODE_NEW_TABS_SPLIT) -> str:
-    """Return where parsed sbatch output/error files should be followed."""
-    value = str(load_settings().get("sbatch_follow_mode", default)).strip()
-    return value if value in SBATCH_FOLLOW_MODES else default
-
-
-def set_sbatch_follow_mode(mode: str) -> str:
-    """Persist where parsed sbatch output/error files should be followed."""
-    value = str(mode or "").strip()
-    if value not in SBATCH_FOLLOW_MODES:
-        value = SBATCH_FOLLOW_MODE_NEW_TABS_SPLIT
-    update_settings({"sbatch_follow_mode": value})
-    return value
-
-
 def get_lssrv_auto_refresh_enabled(default: bool = False) -> bool:
     """Return whether lssrv should refresh with the Jobs polling timer."""
     value = load_settings().get("lssrv_auto_refresh_enabled", default)
@@ -152,16 +112,90 @@ def set_transfer_parallelism(count: int) -> int:
     return value
 
 
-def get_transfer_auto_refresh_enabled(default: bool = True) -> bool:
-    """Return whether transfer/mutation completion should refresh affected panes."""
-    value = load_settings().get("transfer_auto_refresh_enabled", default)
+_TRANSFER_COMPLETION_ACTIONS = {
+    "none",
+    "notification",
+    "attention",
+    "play_sound",
+    "close_once",
+    "run_command",
+    "close",
+    "reboot_once",
+    "shutdown_once",
+    "suspend_once",
+}
+
+
+def get_transfer_completion_action(default: str = "none") -> str:
+    """Return the saved, non-destructive transfer-completion preference."""
+    value = str(load_settings().get("transfer_completion_action", default)).strip()
+    return value if value in _TRANSFER_COMPLETION_ACTIONS else default
+
+
+def set_transfer_completion_action(action: str) -> str:
+    """Persist a completion preference; callers decide whether it is safe to run."""
+    value = str(action or "").strip()
+    if value not in _TRANSFER_COMPLETION_ACTIONS:
+        value = "none"
+    update_settings({"transfer_completion_action": value})
+    return value
+
+
+def get_upload_preflight_confirmation_enabled(default: bool = True) -> bool:
+    """Return whether local uploads should show the preflight confirmation."""
+    value = load_settings().get("upload_preflight_confirmation_enabled", default)
     return value if isinstance(value, bool) else default
 
 
-def set_transfer_auto_refresh_enabled(enabled: bool) -> bool:
-    """Persist whether transfer/mutation completion should refresh affected panes."""
+def set_upload_preflight_confirmation_enabled(enabled: bool) -> bool:
+    """Persist whether local uploads should show the preflight confirmation."""
     value = bool(enabled)
-    update_settings({"transfer_auto_refresh_enabled": value})
+    update_settings({"upload_preflight_confirmation_enabled": value})
+    return value
+
+
+SBATCH_FOLLOW_MODE_NONE = "none"
+SBATCH_FOLLOW_MODE_OUTPUTS_TAB = "outputs_tab"
+SBATCH_FOLLOW_MODE_NEW_TABS_SPLIT = "new_tabs_split"
+SBATCH_FOLLOW_MODE_NEW_WINDOW_COMBINED = "new_window_combined"
+SBATCH_FOLLOW_MODE_NEW_WINDOWS_SPLIT = "new_windows_split"
+SBATCH_FOLLOW_MODES = {
+    SBATCH_FOLLOW_MODE_NONE,
+    SBATCH_FOLLOW_MODE_OUTPUTS_TAB,
+    SBATCH_FOLLOW_MODE_NEW_TABS_SPLIT,
+    SBATCH_FOLLOW_MODE_NEW_WINDOW_COMBINED,
+    SBATCH_FOLLOW_MODE_NEW_WINDOWS_SPLIT,
+}
+
+
+def get_sbatch_follow_mode(default: str = SBATCH_FOLLOW_MODE_OUTPUTS_TAB) -> str:
+    """Return the persisted post-sbatch output/error follow destination.
+
+    The temporary boolean preference introduced in 1.1.10 is read as a
+    migration source only: ``False`` means stay on the current screen and
+    ``True`` means the original Outputs-tab behaviour.  Missing or malformed
+    settings preserve the historical default of opening the Outputs tab.
+    """
+    settings = load_settings()
+    value = str(settings.get("sbatch_follow_mode", "")).strip()
+    if value in SBATCH_FOLLOW_MODES:
+        return value
+    legacy_value = settings.get("focus_jobs_outputs_after_submission_enabled")
+    if isinstance(legacy_value, bool):
+        return (
+            SBATCH_FOLLOW_MODE_OUTPUTS_TAB
+            if legacy_value
+            else SBATCH_FOLLOW_MODE_NONE
+        )
+    return default if default in SBATCH_FOLLOW_MODES else SBATCH_FOLLOW_MODE_OUTPUTS_TAB
+
+
+def set_sbatch_follow_mode(mode: str) -> str:
+    """Persist a validated post-sbatch output/error follow destination."""
+    value = str(mode or "").strip()
+    if value not in SBATCH_FOLLOW_MODES:
+        value = SBATCH_FOLLOW_MODE_OUTPUTS_TAB
+    update_settings({"sbatch_follow_mode": value})
     return value
 
 

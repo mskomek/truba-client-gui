@@ -380,6 +380,39 @@ class SSHClientWrapper:
             self.client = None
         self.log("SSH: closed")
 
+    def open_transfer_sftp(self):
+        """Open an isolated SFTP channel for one upload or download.
+
+        The browsing channel in ``self.sftp`` is deliberately shared by the
+        UI.  Paramiko SFTP clients are not safe to use from several transfer
+        worker threads, so file transfers must obtain their own channel from
+        the already authenticated transport instead.
+        """
+        if self.client is None:
+            raise RuntimeError("SSH client not connected")
+        transport = self.client.get_transport()
+        if transport is None or not transport.is_active():
+            raise RuntimeError("SSH transport is not active")
+        is_authenticated = getattr(transport, "is_authenticated", None)
+        if callable(is_authenticated) and not is_authenticated():
+            raise RuntimeError("SSH transport is not authenticated")
+        return paramiko.SFTPClient.from_transport(transport)
+
+    def supports_transfer_sftp_channels(self) -> bool:
+        """Probe whether the active connection can create isolated channels."""
+        channel = None
+        try:
+            channel = self.open_transfer_sftp()
+            return True
+        except Exception:
+            return False
+        finally:
+            if channel is not None:
+                try:
+                    channel.close()
+                except Exception:
+                    pass
+
     def run(
         self,
         command: str,

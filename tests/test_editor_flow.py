@@ -6,10 +6,9 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, os.path.abspath("src"))
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QFontMetrics
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QMessageBox, QTextEdit
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from truba_gui.ui.widgets.editor_widget import EditorWidget
 
@@ -65,6 +64,8 @@ class EditorFlowTests(unittest.TestCase):
         QMessageBox.critical = self._orig_critical
         self._history_patch.stop()
         self.w.deleteLater()
+        QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        QApplication.processEvents()
 
     def test_save_submit_emits_job_signal(self):
         QMessageBox.question = staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes)
@@ -152,14 +153,6 @@ class EditorFlowTests(unittest.TestCase):
             self.files.data["/arf/scratch/user/save.txt"],
             "after",
         )
-
-    def test_editor_uses_fixed_tab_aligned_text_style(self):
-        expected_tab_width = (
-            QFontMetrics(self.w.text.font()).horizontalAdvance(" ") * 8
-        )
-
-        self.assertEqual(self.w.text.lineWrapMode(), QTextEdit.NoWrap)
-        self.assertEqual(self.w.text.tabStopDistance(), expected_tab_width)
 
     def test_undo_redo_and_select_all_shortcuts_target_active_editor(self):
         self.w.open_file("/arf/scratch/user/keys.txt", "")

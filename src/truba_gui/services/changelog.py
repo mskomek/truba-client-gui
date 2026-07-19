@@ -13,7 +13,7 @@ def load_changelog_text() -> str:
 
 
 def chronological_changelog(text: str) -> str:
-    """Return changelog sections from oldest to newest."""
+    """Return changelog sections from newest to oldest."""
     lines = (text or "").splitlines()
     title_lines: list[str] = []
     sections: list[list[str]] = []
@@ -38,7 +38,7 @@ def chronological_changelog(text: str) -> str:
         return text.strip()
 
     output: list[str] = title_lines[:1] or ["# Changelog"]
-    for section in reversed(sections):
+    for section in sections:
         while section and not section[-1].strip():
             section.pop()
         output.extend(["", *section])

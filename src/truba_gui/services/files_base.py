@@ -56,6 +56,9 @@ class FilesBackend(ABC):
     def mkdir(self, remote_dir: str) -> None:
         raise NotImplementedError
 
+    def chmod(self, remote_path: str, mode: int) -> None:
+        raise NotImplementedError
+
     def copy(self, src_remote_path: str, dst_remote_path: str, recursive: bool = False) -> None:
         raise NotImplementedError
 

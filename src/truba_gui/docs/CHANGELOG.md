@@ -1,17 +1,24 @@
 # Changelog
 
-## v1.1.10
-- Updates: show the full changelog from the earliest entries on the first launch after an update and remember the last shown app version.
-- File operations: ask separately for each nested file conflict during folder upload unless an apply-to-all or queue-wide choice is active, while keeping folder downloads queued off the UI thread.
-- Local files: fixed Delete-key removal for non-empty folders by deleting local directories recursively after confirmation.
+## v1.1.11
+- Transfers: kept large multi-folder uploads and downloads responsive by moving
+  recursive planning, remote probing, and delete preparation out of the GUI
+  thread; transfer queues now publish bounded updates instead of creating an
+  unbounded number of widgets at once.
+- Transfers: added an upload preflight review with an opt-out setting, safer
+  per-file conflict handling, session-accurate resume speed/ETA, and reliable
+  visibility and cancellation for overlapping transfer queues.
+- Jobs & outputs: made follow-path fields editable across output slots, tabs,
+  and separate windows; submitting a job can now keep the current view, use the
+  Outputs tab, or open split/combined follow views according to Settings.
+- Directories: improved local/remote transfer integration, added an SH filter,
+  and kept long shell-script output in a screen-bounded, scrollable dialog.
+- Updates: show changelog entries from newest to oldest after an update.
 
-## v1.1.9
-- FTP: added a plain FTP backend, configurable default local folder and startup remote panel, and normal-download targeting of the current local panel.
-- FTP transfers: added retry for selected failed transfers, selected-item queue removal, live parallelism changes, recursive folder downloads, and safer per-transfer backend sessions.
-- Directories: added multi-field search for remote panels, closable directory tabs, local Delete/Home/End/Page key handling, and focused F5 refresh behavior.
-- Jobs outputs: added independent follow tabs/windows for output and error files, editable followed paths, and menu targets for assigning files into existing follow views.
-- Slurm submission: added settings for whether sbatch switches to Outputs and where parsed output/error files should open after submission.
-- Interface: removed remaining fallback UI strings from updated menus, settings, transfer tables, and file panels in Turkish and English.
+## v1.1.10
+- Updates: show the full changelog from newest to oldest on the first launch after an update and remember the last shown app version.
+- File operations: ask separately for each nested file conflict during folder upload and download unless an apply-to-all or queue-wide choice is active.
+- Local files: fixed Delete-key removal for non-empty folders by deleting local directories recursively after confirmation.
 
 ## v1.1.8
 - FTP transfers: fixed configured parallel transfers so multiple uploads or downloads can run at the same time instead of staying sequential.
